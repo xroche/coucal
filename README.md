@@ -14,6 +14,8 @@ This allows an efficient generic hashtable implementation, with the following fe
 * one large memory chunk for table (and one for the key pool)
 * simple enumeration
 
+This library has been thoroughly tested, and is currently used by the [HTTrack](http://www.httrack.com/) project in production.
+
 **Example**
 
 ```c
@@ -30,5 +32,3 @@ while((item = coucal_enum_next(&enumerator)) != NULL) {
   printf("%s=%s\n", (const char*) item->name, (const char*) item->value.ptr);
 }
 ```
-
-
