@@ -6,7 +6,7 @@
 
 CFILES = coucal.c
 
-all: gcc tests sample
+all: gcc tests sample runtests
 
 clean:
 	rm -f *.o *.obj *.so* *.dll *.exe *.pdb *.exp *.lib sample tests
@@ -44,3 +44,5 @@ sample:
 		-lcoucal -L. \
 		sample.o -o sample
 
+runtests:
+	LD_LIBRARY_PATH=. ./tests 100000

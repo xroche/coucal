@@ -1,3 +1,35 @@
+/* ------------------------------------------------------------ */
+/*
+Coucal, Cuckoo hashing-based hashtable with stash area.
+Copyright (C) 2013-2014 Xavier Roche and other contributors
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+this list of conditions and the following disclaimer in the documentation
+and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its contributors
+may be used to endorse or promote products derived from this software without
+specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -74,23 +106,6 @@ static int coucal_test(const char *snum) {
   char *buff = NULL;
   const char **strings = NULL;
 
-  /* produce key #i */
-#define FMT() \
-  char buffer[256]; \
-  const char *name; \
-  const long expected = (long) i * 1664525 + 1013904223; \
-  do { \
-    if (strings == NULL) { \
-      snprintf(buffer, sizeof(buffer), \
-        "http://www.example.com/website/sample/for/hashtable/" \
-        "%ld/index.html?foo=%ld&bar", \
-        (long) i, (long) (expected)); \
-      name = buffer; \
-    } else { \
-      name = strings[i]; \
-    } \
-  } while(0)
-
   /* produce random patterns, or read from a file */
   if (sscanf(snum, "%lu", &count) != 1) {
     const size_t size = fsize(snum);
@@ -129,7 +144,18 @@ static int coucal_test(const char *snum) {
       for(i = bench[loop].offset ; i < (size_t) count
           ; i += bench[loop].modulus) {
         int result;
-        FMT();
+        char buffer[256];
+        const char *name;
+        const long expected = (long) i * 1664525 + 1013904223;
+        if (strings == NULL) {
+          snprintf(buffer, sizeof(buffer),
+            "http://www.example.com/website/sample/for/hashtable/"
+            "%ld/index.html?foo=%ld&bar",
+            (long) i, (long) (expected));
+          name = buffer;
+        } else {
+          name = strings[i];
+        }
         if (bench[loop].type == DO_ADD
             || bench[loop].type == DO_DRY_ADD) {
           size_t k;
@@ -187,12 +213,11 @@ static int coucal_test(const char *snum) {
     fprintf(stderr, "Malformed number\n");
     return EXIT_FAILURE;
   }
-#undef FMT
 }
 
 int main(int argc, char **argv) {
   if (argc == 2) {
-    return coucal_test(argv[0]);
+    return coucal_test(argv[1]);
   } else {
     fprintf(stderr, "usage: %s [number-of-tests | keys-filename]\n", argv[0]);
     return EXIT_FAILURE;
