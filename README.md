@@ -18,6 +18,11 @@ This allows an efficient generic hashtable implementation, with the following fe
 
 This library has been thoroughly tested, and is currently used by the [HTTrack](http://www.httrack.com/) project in production.
 
+**License**
+
+This library is licensed under the [BSD 3-Clause License](http://opensource.org/licenses/BSD-3-Clause)
+See the [LICENSE](LICENSE) file.
+
 **Example**
 
 ```c
