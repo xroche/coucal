@@ -29,9 +29,7 @@ See the [LICENSE](LICENSE) file.
 coucal hashtable = coucal_new(0);
 coucal_write_pvoid(hashtable, "foo", "bar");
 
-void *value;
-coucal_read_pvoid(hashtable, "foo", &value);
-printf("value==%s\n", (char*) value);
+printf("value==%s\n", (char*) coucal_get_pvoid(hashtable, "foo"));
 
 struct_coucal_enum enumerator = coucal_enum_new(hashtable);
 coucal_item *item;
