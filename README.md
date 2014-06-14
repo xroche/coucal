@@ -3,6 +3,8 @@ coucal
 
 **Coucal**, Cuckoo-hashing-based hashtable with stash area C library.
 
+![Greater Coucal Centropus sinensis](http://upload.wikimedia.org/wikipedia/commons/thumb/8/8d/Greater_Coucal_%28Centropus_sinensis%29_in_Hyderabad_W_IMG_8962.jpg/250px-Greater_Coucal_%28Centropus_sinensis%29_in_Hyderabad_W_IMG_8962.jpg "Centropus sinensis")
+
 > [Wikipedia] A coucal is one of about 30 species of birds in the cuckoo family. All of them belong in the subfamily Centropodinae and the genus Centropus. Unlike many Old World cuckoos, coucals are not brood parasites.
 
 This is an implementation of the cuckoo hashing algorithm (http://en.wikipedia.org/wiki/Cuckoo_hashing) with a stash area (http://research.microsoft.com/pubs/73856/stash-full.9-30.pdf).
