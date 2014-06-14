@@ -6,10 +6,10 @@
 
 CFILES = coucal.c
 
-all: gcc test
+all: gcc tests sample
 
 clean:
-	rm -f *.o *.obj *.so* *.dll *.exe *.pdb *.exp *.lib sample
+	rm -f *.o *.obj *.so* *.dll *.exe *.pdb *.exp *.lib sample tests
 
 tar:
 	rm -f coucal.tgz
@@ -26,7 +26,16 @@ gcc:
 		coucal.o -o libcoucal.so \
 		-ldl -lpthread
 
-test:
+tests:
+	gcc -c -fPIC -O3 -g3 \
+		-W -Wall -Wextra -Werror -Wno-unused-function \
+		-D_REENTRANT \
+		tests.c -o tests.o
+	gcc -fPIC -O3 -Wl,-O1 \
+		-lcoucal -L. \
+		tests.o -o tests 
+
+sample:
 	gcc -c -fPIC -O3 -g3 \
 		-W -Wall -Wextra -Werror -Wno-unused-function \
 		-D_REENTRANT \
