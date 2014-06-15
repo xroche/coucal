@@ -20,7 +20,7 @@ This library has been thoroughly tested, and is currently used by the [HTTrack](
 
 **License**
 
-Copyright (C) 2013-2014 Xavier Roche (http://www.httrack.com/).
+Copyright © 2013-2014 Xavier Roche (http://www.httrack.com/).
 All rights reserved.
 
 This library is licensed under the [BSD 3-Clause License](http://opensource.org/licenses/BSD-3-Clause)
