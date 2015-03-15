@@ -711,7 +711,8 @@ static void coucal_free_key_internal(coucal hashtable, coucal_key name_) {
   *name = '\0'; /* the string is now invalidated */
 
   /* compact the pool is too many holes  */
-  if (hashtable->pool.used < hashtable->pool.size / 2) {
+  if (hashtable->pool.used != 0
+      && hashtable->pool.used < hashtable->pool.size / 2) {
     size_t capacity = hashtable->pool.capacity;
     /* compact and shrink */
     if (hashtable->pool.used < capacity / 4) {
