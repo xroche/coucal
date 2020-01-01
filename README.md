@@ -7,7 +7,7 @@ coucal
 
 > [Wikipedia] A coucal is one of about 30 species of birds in the cuckoo family. All of them belong in the subfamily Centropodinae and the genus Centropus. Unlike many Old World cuckoos, coucals are not brood parasites.
 
-This is an implementation of the cuckoo hashing algorithm (Rasmus Pagh and Flemming Friche Rodler, http://www.it-c.dk/people/pagh/papers/cuckoo-jour.pdf) with a stash area (Adam Kirsch, Michael Mitzenmacher and Udi Wieder, http://research.microsoft.com/pubs/73856/stash-full.9-30.pdf), using by default the MurmurHash hash function (Austin Appleby, http://en.wikipedia.org/wiki/MurmurHash).
+This is an implementation of the cuckoo hashing algorithm ([paper](https://web.archive.org/web/20180219194838/www.it-c.dk/people/pagh/papers/cuckoo-jour.pdf) by Rasmus Pagh and Flemming Friche Rodler) with a stash area ([paper](https://web.archive.org/web/20160325171418/research.microsoft.com/pubs/73856/stash-full.9-30.pdf) by Adam Kirsch, Michael Mitzenmacher and Udi Wieder), using by default the MurmurHash hash function (Austin Appleby, http://en.wikipedia.org/wiki/MurmurHash).
 
 This allows an efficient generic hashtable implementation, with the following features:
 * guaranteed constant time (Θ(1)) lookup
