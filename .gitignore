@@ -1,0 +1,14 @@
+# Build artifacts
+*.o
+*.a
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+tests
+sample
+coucal.tgz
+
+# Local Claude Code working notes (untracked)
+/CLAUDE.local.md
