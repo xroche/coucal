@@ -20,15 +20,20 @@ typedef unsigned __int64 uint64_t;
 #else
 #include <stdint.h>
 #endif
+#include <string.h>
 
 static uint32_t rotl32 ( uint32_t x, int8_t r )
 {
   return (x << r) | (x >> (32 - r));
 }
 #define ROTL32(x,y)     rotl32(x,y)
-static uint32_t getblock32 ( const uint32_t * p, int i )
+static uint32_t getblock32 ( const uint8_t * p, int i )
 {
-  return p[i];
+  /* memcpy the 32-bit block: defined on any alignment, and lowered to the same
+     single load as p[i] on hosts that tolerate unaligned access. */
+  uint32_t v;
+  memcpy(&v, p + (size_t)i * 4, sizeof(v));
+  return v;
 }
 static uint32_t fmix32 ( uint32_t h )
 {
@@ -56,7 +61,7 @@ static void MurmurHash3_x86_128 ( const void * key, const int len,
   const uint32_t c3 = 0x38b34ae5; 
   const uint32_t c4 = 0xa1e38b93;
 
-  const uint32_t * blocks = (const uint32_t *)(data + nblocks*16);
+  const uint8_t * blocks = data + nblocks*16;
   int i;
   
   for(i = -nblocks; i; i++)

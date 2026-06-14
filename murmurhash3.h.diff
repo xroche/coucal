@@ -1,6 +1,6 @@
---- murmurhash3.h.orig	2014-06-14 14:29:11.562576736 +0200
-+++ murmurhash3.h	2014-06-14 14:39:43.989624584 +0200
-@@ -7,7 +7,19 @@
+--- murmurhash3.h.orig	2015-03-15 15:22:27.882839226 +0100
++++ murmurhash3.h	2026-06-14 23:15:26.024117389 +0200
+@@ -7,16 +7,33 @@
  // compile and run any of them on any platform, but your performance with the
  // non-native version will be less than optimal.
  
@@ -17,6 +17,53 @@
 +#else
  #include <stdint.h>
 +#endif
++#include <string.h>
  
  static uint32_t rotl32 ( uint32_t x, int8_t r )
  {
+   return (x << r) | (x >> (32 - r));
+ }
+ #define ROTL32(x,y)     rotl32(x,y)
+-static uint32_t getblock32 ( const uint32_t * p, int i )
++static uint32_t getblock32 ( const uint8_t * p, int i )
+ {
+-  return p[i];
++  /* memcpy the 32-bit block: defined on any alignment, and lowered to the same
++     single load as p[i] on hosts that tolerate unaligned access. */
++  uint32_t v;
++  memcpy(&v, p + (size_t)i * 4, sizeof(v));
++  return v;
+ }
+ static uint32_t fmix32 ( uint32_t h )
+ {
+@@ -44,7 +61,7 @@
+   const uint32_t c3 = 0x38b34ae5; 
+   const uint32_t c4 = 0xa1e38b93;
+ 
+-  const uint32_t * blocks = (const uint32_t *)(data + nblocks*16);
++  const uint8_t * blocks = data + nblocks*16;
+   int i;
+   
+   for(i = -nblocks; i; i++)
+@@ -79,6 +96,11 @@
+   uint32_t k3 = 0;
+   uint32_t k4 = 0;
+ 
++  /* the tail switch deliberately falls through each case */
++#if defined(__GNUC__) || defined(__clang__)
++#pragma GCC diagnostic push
++#pragma GCC diagnostic ignored "-Wimplicit-fallthrough"
++#endif
+   switch(len & 15)
+   {
+   case 15: k4 ^= tail[14] << 16;
+@@ -104,6 +126,9 @@
+   case  1: k1 ^= tail[ 0] << 0;
+            k1 *= c1; k1  = ROTL32(k1,15); k1 *= c2; h1 ^= k1;
+   };
++#if defined(__GNUC__) || defined(__clang__)
++#pragma GCC diagnostic pop
++#endif
+ 
+ 
+   h1 ^= len; h2 ^= len; h3 ^= len; h4 ^= len;
