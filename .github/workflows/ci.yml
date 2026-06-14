@@ -33,7 +33,7 @@ jobs:
           - { arch: arm64,  runner: ubuntu-24.04-arm, cc: gcc }
           - { arch: arm64,  runner: ubuntu-24.04-arm, cc: clang }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install toolchain
         run: |
@@ -50,7 +50,7 @@ jobs:
     name: sanitizers (asan+ubsan, gcc)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install toolchain
         run: |
@@ -76,7 +76,7 @@ jobs:
     name: build+test (linux i386, gcc -m32)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install 32-bit toolchain
         run: |
@@ -94,7 +94,7 @@ jobs:
     name: build+test (macOS arm64, clang)
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # The Makefile is portable (it switches to a .dylib link on Darwin), so
       # macOS runs the same `make all check`. This exercises the code on a
