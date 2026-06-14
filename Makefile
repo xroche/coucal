@@ -1,49 +1,85 @@
 ###############################################################################
 #
-# "Cuckoo Hashtables"
+# coucal — Cuckoo-hashing hashtable with a stash area
 #
 ###############################################################################
 
-CFILES = coucal.c
+# --- Toolchain (overridable) -------------------------------------------------
+# cc/ar are the POSIX defaults; CI overrides CC with clang or "gcc -m32".
+CC      ?= cc
+AR      ?= ar
+RM      ?= rm -f
+INSTALL ?= install
+PREFIX  ?= /usr/local
 
-all: gcc tests sample runtests
+# --- Flags -------------------------------------------------------------------
+# CFLAGS holds the user-overridable optimization/debug flags. Everything
+# mandatory (PIC, reentrancy, strict warnings, the default hash backend) is
+# appended with `override` so it survives a command-line CFLAGS=... — e.g. CI
+# injecting sanitizer flags.
+CFLAGS  ?= -O3 -g
 
-clean:
-	rm -f *.o *.obj *.so* *.dll *.exe *.pdb *.exp *.lib sample tests
+override CPPFLAGS += -D_REENTRANT -D_GNU_SOURCE -DHTS_INTHASH_USES_MURMUR
+override CFLAGS   += -fPIC -pthread \
+                    -W -Wall -Wextra -Werror -Wno-unused-function
 
-tar:
-	rm -f coucal.tgz
-	tar cvfz coucal.tgz coucal.c coucal.h murmurhash3.h \
+# --- Platform shared-library wiring ------------------------------------------
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+  SHLIB   := libcoucal.dylib
+  SOFLAGS := -dynamiclib -install_name @rpath/$(SHLIB)
+  SOLIBS  :=
+else
+  SHLIB   := libcoucal.so
+  SOFLAGS := -shared -Wl,-soname=$(SHLIB) -Wl,--no-undefined
+  SOLIBS  := -ldl -lpthread
+endif
+
+STATICLIB := libcoucal.a
+
+# --- Sources -----------------------------------------------------------------
+LIBSRC := coucal.c
+LIBOBJ := $(LIBSRC:.c=.o)
+BINS   := tests sample
+
+# --- Targets -----------------------------------------------------------------
+.PHONY: all check test clean dist install
+.DEFAULT_GOAL := all
+
+all: $(STATICLIB) $(SHLIB) $(BINS)
+
+# Every object needs the public header; the library object also pulls in the
+# bundled MurmurHash implementation.
+%.o: %.c coucal.h
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+coucal.o: murmurhash3.h
+
+$(STATICLIB): $(LIBOBJ)
+	$(AR) rcs $@ $^
+
+$(SHLIB): $(LIBOBJ)
+	$(CC) $(CFLAGS) $(SOFLAGS) $(LIBOBJ) -o $@ $(LDFLAGS) $(SOLIBS)
+
+# tests/sample link the static archive: no LD_LIBRARY_PATH, identical run on
+# Linux and macOS.
+tests: tests.o $(STATICLIB)
+	$(CC) $(CFLAGS) $< $(STATICLIB) -o $@ $(LDFLAGS)
+sample: sample.o $(STATICLIB)
+	$(CC) $(CFLAGS) $< $(STATICLIB) -o $@ $(LDFLAGS)
+
+check test: tests
+	./tests 100000
+
+install: all
+	$(INSTALL) -d $(DESTDIR)$(PREFIX)/lib $(DESTDIR)$(PREFIX)/include
+	$(INSTALL) -m 644 $(STATICLIB) $(DESTDIR)$(PREFIX)/lib/
+	$(INSTALL) -m 755 $(SHLIB)     $(DESTDIR)$(PREFIX)/lib/
+	$(INSTALL) -m 644 coucal.h     $(DESTDIR)$(PREFIX)/include/
+
+dist:
+	$(RM) coucal.tgz
+	tar cvfz coucal.tgz $(LIBSRC) coucal.h murmurhash3.h \
 		sample.c tests.c Makefile LICENSE README.md
 
-gcc:
-	gcc -c -fPIC -O3 -g3 -pthread \
-		-W -Wall -Wextra -Werror -Wno-unused-function \
-		-D_REENTRANT -D_GNU_SOURCE \
-		-DHTS_INTHASH_USES_MURMUR \
-		$(CFILES)
-	gcc -shared -fPIC -O3 -Wl,-O1 -Wl,--no-undefined \
-		-rdynamic -shared -Wl,-soname=libcoucal.so \
-		coucal.o -o libcoucal.so \
-		-ldl -lpthread
-
-tests:
-	gcc -c -fPIC -O3 -g3 \
-		-W -Wall -Wextra -Werror -Wno-unused-function \
-		-D_REENTRANT \
-		tests.c -o tests.o
-	gcc -fPIC -O3 -Wl,-O1 \
-		tests.o -o tests \
-		-L. -lcoucal
-
-sample:
-	gcc -c -fPIC -O3 -g3 \
-		-W -Wall -Wextra -Werror -Wno-unused-function \
-		-D_REENTRANT \
-		sample.c -o sample.o
-	gcc -fPIC -O3 -Wl,-O1 \
-		sample.o -o sample \
-		-L. -lcoucal
-
-runtests:
-	LD_LIBRARY_PATH=. ./tests 100000
+clean:
+	$(RM) *.o $(STATICLIB) $(SHLIB) libcoucal.so.* $(BINS) coucal.tgz

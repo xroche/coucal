@@ -35,6 +35,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <string.h>
 #include <assert.h>
 #include <stdarg.h>
+#include <inttypes.h>
 
 #include "coucal.h"
 
@@ -109,15 +110,18 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 /* 64-bit constant */
 #if (defined(WIN32))
 #define UINT_64_CONST(X) ((uint64_t) (X))
-#define UINT_64_FORMAT "I64d"
 #elif (defined(_LP64) || defined(__x86_64__) \
        || defined(__powerpc64__) || defined(__64BIT__))
 #define UINT_64_CONST(X) ((uint64_t) X##UL)
-#define UINT_64_FORMAT "ld"
 #else
 #define UINT_64_CONST(X) ((uint64_t) X##ULL)
-#define UINT_64_FORMAT "lld"
 #endif
+
+/* printf length modifier for uint64_t. The hand-rolled "ld"/"lld" guess broke
+   on LP64 platforms where uint64_t is unsigned long long rather than unsigned
+   long (e.g. Apple arm64), tripping clang -Wformat. PRIu64 matches uint64_t
+   exactly everywhere; all UINT_64_FORMAT arguments are (uint64_t)-cast counts. */
+#define UINT_64_FORMAT PRIu64
 
 /** Hashtable. **/
 struct struct_coucal {

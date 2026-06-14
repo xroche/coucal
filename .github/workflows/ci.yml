@@ -1,0 +1,103 @@
+# Build and test coucal across compilers, architectures, the 32-bit ABI,
+# sanitizers, and macOS. The library ships as a hand-written Makefile, so CI
+# drives that Makefile directly: it is exactly what rotted unnoticed before
+# (a stale link order made `make` fail on modern toolchains, with no CI to
+# catch it).
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+# Least privilege: the workflow only needs to read the repo.
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same branch or PR.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build+test (${{ matrix.arch }}, ${{ matrix.cc }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86-64, runner: ubuntu-24.04,     cc: gcc }
+          - { arch: x86-64, runner: ubuntu-24.04,     cc: clang }
+          - { arch: arm64,  runner: ubuntu-24.04-arm, cc: gcc }
+          - { arch: arm64,  runner: ubuntu-24.04-arm, cc: clang }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential clang
+
+      # `make all` builds the static lib, shared lib, tests, and sample under
+      # the chosen compiler; `make check` runs the test suite.
+      - name: Build and test
+        run: make all check CC=${{ matrix.cc }}
+
+  sanitizers:
+    name: sanitizers (asan+ubsan, gcc)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential
+
+      # The hashtable is pointer- and offset-heavy: the string pool realloc()
+      # moves interior key pointers and recomputes them by offset. ASan/UBSan
+      # are the cheapest guard against the use-after-free / out-of-bounds class
+      # of bug on that path. Flags ride in via CFLAGS/LDFLAGS, which the
+      # Makefile appends its mandatory flags onto.
+      - name: Build and run under ASan + UBSan
+        env:
+          ASAN_OPTIONS: detect_leaks=1
+        run: |
+          set -euo pipefail
+          make check \
+            CFLAGS="-O1 -g -fsanitize=address -fsanitize=undefined -fno-sanitize-recover=all" \
+            LDFLAGS="-fsanitize=address -fsanitize=undefined"
+
+  abi32:
+    name: build+test (linux i386, gcc -m32)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install 32-bit toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential gcc-multilib
+
+      # Exercises the 32-bit pointer / size_t ABI, where the string-pool offset
+      # math (the uintptr_t pointer recompute) can truncate or wrap in ways the
+      # 64-bit build never reveals.
+      - name: Build and test (-m32)
+        run: make all check CC="gcc -m32"
+
+  macos:
+    name: build+test (macOS arm64, clang)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      # The Makefile is portable (it switches to a .dylib link on Darwin), so
+      # macOS runs the same `make all check`. This exercises the code on a
+      # second libc/kernel and on Apple clang.
+      - name: Build and test
+        run: make all check

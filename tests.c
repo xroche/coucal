@@ -101,7 +101,7 @@ static int coucal_test(const char *snum) {
     { DO_DEL, 42, 0 },    /* add 42/0 */
     { TEST_DEL, 42, 0 },  /* check 42/0 */
     { TEST_ADD, 42, 2 },  /* check 42/2 */
-    { DO_END }
+    { DO_END, 0, 0 }
   };
   char *buff = NULL;
   const char **strings = NULL;
