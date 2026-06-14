@@ -143,7 +143,7 @@ static int coucal_test(const char *snum) {
       size_t i;
       for(i = bench[loop].offset ; i < (size_t) count
           ; i += bench[loop].modulus) {
-        int result;
+        int result = 0;
         char buffer[256];
         const char *name;
         const long expected = (long) i * 1664525 + 1013904223;

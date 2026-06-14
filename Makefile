@@ -13,7 +13,8 @@ clean:
 
 tar:
 	rm -f coucal.tgz
-	tar cvfz coucal.tgz coucal.txt coucal.c coucal.h Makefile LICENSE README.md
+	tar cvfz coucal.tgz coucal.c coucal.h murmurhash3.h \
+		sample.c tests.c Makefile LICENSE README.md
 
 gcc:
 	gcc -c -fPIC -O3 -g3 -pthread \
@@ -32,8 +33,8 @@ tests:
 		-D_REENTRANT \
 		tests.c -o tests.o
 	gcc -fPIC -O3 -Wl,-O1 \
-		-lcoucal -L. \
-		tests.o -o tests 
+		tests.o -o tests \
+		-L. -lcoucal
 
 sample:
 	gcc -c -fPIC -O3 -g3 \
@@ -41,8 +42,8 @@ sample:
 		-D_REENTRANT \
 		sample.c -o sample.o
 	gcc -fPIC -O3 -Wl,-O1 \
-		-lcoucal -L. \
-		sample.o -o sample
+		sample.o -o sample \
+		-L. -lcoucal
 
 runtests:
 	LD_LIBRARY_PATH=. ./tests 100000

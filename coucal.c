@@ -601,7 +601,9 @@ static void coucal_compact_pool(coucal hashtable, size_t capacity) {
 /* realloc (expand) string pool ; does not change the compacity */
 static void coucal_realloc_pool(coucal hashtable, size_t capacity) {
   const size_t hash_size = POW2(hashtable->lg_size);
-  char *const oldbase = hashtable->pool.buffer;
+  /* keep the old base as an integer: after realloc() the old pointer value is
+     indeterminate and must not be used in pointer arithmetic (-Wuse-after-free) */
+  const uintptr_t oldbase = (uintptr_t) hashtable->pool.buffer;
   size_t count = 0;
 
   /* we manage the string pool */
@@ -633,7 +635,7 @@ static void coucal_realloc_pool(coucal hashtable, size_t capacity) {
   /* recompute string address */
 #define RECOMPUTE_STRING(S) do {                                     \
     if (S != NULL && S != the_empty_string) {                        \
-      const size_t offset = (const char*) (S) - oldbase;             \
+      const size_t offset = (uintptr_t) (const char*) (S) - oldbase; \
       coucal_assert(hashtable, offset < hashtable->pool.capacity);  \
       S = &hashtable->pool.buffer[offset];                           \
       count++;                                                       \
@@ -641,7 +643,7 @@ static void coucal_realloc_pool(coucal hashtable, size_t capacity) {
 } while(0)
 
   /* recompute string addresses */
-  if (hashtable->pool.buffer != oldbase) {
+  if ((uintptr_t) hashtable->pool.buffer != oldbase) {
     size_t i;
     for(i = 0 ; i < hash_size ; i++) {
       RECOMPUTE_STRING(hashtable->items[i].name);

@@ -91,6 +91,11 @@ static void MurmurHash3_x86_128 ( const void * key, const int len,
   uint32_t k3 = 0;
   uint32_t k4 = 0;
 
+  /* the tail switch deliberately falls through each case */
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wimplicit-fallthrough"
+#endif
   switch(len & 15)
   {
   case 15: k4 ^= tail[14] << 16;
@@ -116,6 +121,9 @@ static void MurmurHash3_x86_128 ( const void * key, const int len,
   case  1: k1 ^= tail[ 0] << 0;
            k1 *= c1; k1  = ROTL32(k1,15); k1 *= c2; h1 ^= k1;
   };
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 
   h1 ^= len; h2 ^= len; h3 ^= len; h4 ^= len;
