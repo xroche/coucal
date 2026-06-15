@@ -215,7 +215,37 @@ static int coucal_test(const char *snum) {
   }
 }
 
+/* Regression for the MurmurHash3 tail UB: a key byte landing in a "<< 24" slot
+   with the high bit set used to overflow signed int (UBSan). Lengths 4/8/12 put
+   that byte last; hash and read each back so a sanitized run guards the fix. */
+static int coucal_test_high_bytes(void) {
+  static const char *const keys[] = {
+    "abc\xC3",        /* len 4  -> tail[3]  << 24 */
+    "abcdefg\xC3",    /* len 8  -> tail[7]  << 24 */
+    "abcdefghijk\xC3" /* len 12 -> tail[11] << 24 */
+  };
+  coucal hashtable = coucal_new(0);
+  size_t i;
+  for(i = 0 ; i < sizeof(keys)/sizeof(keys[0]) ; i++) {
+    coucal_write(hashtable, keys[i], (uintptr_t) (i + 1));
+  }
+  for(i = 0 ; i < sizeof(keys)/sizeof(keys[0]) ; i++) {
+    intptr_t value = -1;
+    if (!coucal_readptr(hashtable, keys[i], &value)
+        || value != (intptr_t) (i + 1)) {
+      fprintf(stderr, "high-byte key %lu failed\n", (unsigned long) i);
+      coucal_delete(&hashtable);
+      return EXIT_FAILURE;
+    }
+  }
+  coucal_delete(&hashtable);
+  return EXIT_SUCCESS;
+}
+
 int main(int argc, char **argv) {
+  if (coucal_test_high_bytes() != EXIT_SUCCESS) {
+    return EXIT_FAILURE;
+  }
   if (argc == 2) {
     return coucal_test(argv[1]);
   } else {
