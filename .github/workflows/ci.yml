@@ -163,3 +163,52 @@ jobs:
             -D_REENTRANT -Ici/md5-stub -DHTS_INTHASH_USES_MD5"
           cc $flags -c coucal.c -o /dev/null
           cc $flags -DCOUCAL_HASH_SIZE=64 -c coucal.c -o /dev/null
+
+  # MemorySanitizer catches reads of uninitialized memory that ASan/UBSan miss.
+  # coucal's default build uses only libc (which MSan intercepts), so the whole
+  # library is instrumented -- no uninstrumented dependency to flood the run
+  # with false positives. Static build (tests link the archive); flags ride in
+  # via CFLAGS/LDFLAGS, which the Makefile appends its mandatory flags onto.
+  msan:
+    name: msan (MemorySanitizer, clang)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential clang
+
+      - name: Build and test under MSan
+        env:
+          MSAN_OPTIONS: abort_on_error=1:halt_on_error=1
+        run: |
+          set -euo pipefail
+          make check CC=clang \
+            CFLAGS="-fsanitize=memory -fsanitize-memory-track-origins=2 -fno-sanitize-recover=all -g -O1 -fno-omit-frame-pointer" \
+            LDFLAGS="-fsanitize=memory"
+
+  # Differential fuzzing: fuzz/coucal_fuzz.c drives coucal and a reference model
+  # in lockstep over a fuzzer-decoded op stream, aborting on any divergence.
+  # Build the harness with libFuzzer and replay the committed seed corpus under
+  # ASan+UBSan+LeakSanitizer. Replay (not open-ended mutation) keeps CI
+  # deterministic and pins the seeds; deep discovery is a manual / OSS-Fuzz job.
+  fuzz:
+    name: fuzz (libFuzzer corpus replay, clang)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential clang
+
+      - name: Build harness and replay corpus
+        env:
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=1:halt_on_error=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: bash fuzz/run-fuzzers.sh
