@@ -1,0 +1,51 @@
+# CodeQL static analysis (C). The security-extended suite covers the classes a
+# pointer- and offset-heavy hashtable actually fights: out-of-bounds indexing,
+# tainted-size allocations, use-after-free on the reallocated string pool.
+name: CodeQL
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  schedule:
+    # Weekly re-scan of master so new/updated queries land without a push.
+    - cron: "17 4 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: analyze (c-cpp)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      # Upload findings to the repo's code-scanning dashboard.
+      security-events: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential
+
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: c-cpp
+          build-mode: manual
+          queries: security-extended
+
+      # Manual build: CodeQL traces the compiler, so build exactly what ships.
+      # The default MurmurHash/32-bit config is the library everyone links.
+      - name: Build
+        run: make all
+
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:c-cpp"

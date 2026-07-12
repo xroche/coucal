@@ -63,13 +63,20 @@ jobs:
       # are the cheapest guard against the use-after-free / out-of-bounds class
       # of bug on that path. Flags ride in via CFLAGS/LDFLAGS, which the
       # Makefile appends its mandatory flags onto.
+      # Poison fresh allocations with 0xCA and freed blocks with 0xCB so memory
+      # never reads back as accidental zeros: a stale interior key pointer or a
+      # missing-NUL then dereferences a redzone instead of a lucky 0. calloc'd
+      # memory (the items table) stays zeroed, so the name==NULL free-slot check
+      # is unaffected. Leaks are in scope here -- the suite frees everything, so
+      # detect_leaks=1 stays on -- and every finding aborts the run.
       - name: Build and run under ASan + UBSan
         env:
-          ASAN_OPTIONS: detect_leaks=1
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=1:halt_on_error=1:strict_string_checks=1:malloc_fill_byte=202:max_malloc_fill_size=2147483647:free_fill_byte=203:max_free_fill_size=2147483647
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
         run: |
           set -euo pipefail
           make check \
-            CFLAGS="-O1 -g -fsanitize=address -fsanitize=undefined -fno-sanitize-recover=all" \
+            CFLAGS="-O1 -g -fsanitize=address -fsanitize=undefined -fno-sanitize-recover=all -fno-omit-frame-pointer" \
             LDFLAGS="-fsanitize=address -fsanitize=undefined"
 
   abi32:
@@ -101,3 +108,58 @@ jobs:
       # second libc/kernel and on Apple clang.
       - name: Build and test
         run: make all check
+
+  # Build and test every non-default hash backend and the 64-bit key width.
+  # Only the default (MurmurHash / 32-bit, covered by the `build` matrix above)
+  # was ever compiled, so the FNV1, 64-bit and OpenSSL-MD5 configs had silently
+  # rotted (they failed to build under -Werror). This leg keeps them honest.
+  # MURMUR/32 is omitted here -- the build matrix already covers it.
+  config-matrix:
+    name: config (${{ matrix.backend }}, ${{ matrix.size }}-bit)
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { backend: MURMUR,      size: 64 }
+          - { backend: FNV1,        size: 32 }
+          - { backend: FNV1,        size: 64 }
+          - { backend: OPENSSL_MD5, size: 32 }
+          - { backend: OPENSSL_MD5, size: 64 }
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          # libssl-dev only matters for the OPENSSL_MD5 backend; harmless otherwise.
+          sudo apt-get install -y --no-install-recommends build-essential libssl-dev
+
+      - name: Build and test
+        run: make all check HASH_BACKEND=${{ matrix.backend }} HASH_SIZE=${{ matrix.size }}
+
+  # HTTrack builds coucal (its src/coucal submodule) with -DHTS_INTHASH_USES_MD5
+  # and supplies its own md5.h, so that backend cannot build standalone. We can't
+  # run it here, but we compile-check the branch under -Werror against an
+  # API-compatible stub header (ci/md5-stub/md5.h) so it can't rot on the coucal
+  # side between submodule bumps. Full functional coverage lives in httrack's CI.
+  md5-smoke:
+    name: config (bundled MD5, compile-only)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential
+
+      - name: Compile the bundled-MD5 branch (32- and 64-bit)
+        run: |
+          set -euo pipefail
+          flags="-O2 -g -W -Wall -Wextra -Werror -Wno-unused-function \
+            -D_REENTRANT -Ici/md5-stub -DHTS_INTHASH_USES_MD5"
+          cc $flags -c coucal.c -o /dev/null
+          cc $flags -DCOUCAL_HASH_SIZE=64 -c coucal.c -o /dev/null
