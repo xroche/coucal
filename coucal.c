@@ -95,8 +95,13 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
    allocates it, Final digests and frees it. */
 #include <openssl/evp.h>
 #define HashMD5Context EVP_MD_CTX *
+/* EVP_MD_CTX_new() allocates and can return NULL under OOM (the low-level
+   MD5_Init it replaces could not fail). Guard it the same way coucal guards
+   every other allocation -- coucal_assert() routes NULL through the fatal
+   handler / abort() -- so we never dereference a NULL ctx in EVP_DigestInit_ex. */
 #define HashMD5Init(CTX, FLAG) \
-  (*(CTX) = EVP_MD_CTX_new(), EVP_DigestInit_ex(*(CTX), EVP_md5(), NULL))
+  (coucal_assert(NULL, (*(CTX) = EVP_MD_CTX_new()) != NULL), \
+   EVP_DigestInit_ex(*(CTX), EVP_md5(), NULL))
 #define HashMD5Update(CTX, DATA, SIZE) EVP_DigestUpdate(*(CTX), DATA, SIZE)
 #define HashMD5Final(DIGEST, CTX) \
   do { \
