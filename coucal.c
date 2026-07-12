@@ -89,11 +89,28 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define HashMD5Final(DIGEST, CTX) MD5Final(DIGEST, CTX)
 #define HashMD5Context MD5CTX
 #elif (defined(HTS_INTHASH_USES_OPENSSL_MD5))
-#include <openssl/md5.h>
-#define HashMD5Init(CTX, FLAG) MD5_Init(CTX)
-#define HashMD5Update(CTX, DATA, SIZE) MD5_Update(CTX, DATA, SIZE)
-#define HashMD5Final(DIGEST, CTX) MD5_Final(DIGEST, CTX)
-#define HashMD5Context MD5_CTX
+/* OpenSSL's low-level MD5_Init/Update/Final were deprecated in OpenSSL 3.0;
+   drive MD5 through the EVP interface instead. HashMD5Context is the context
+   pointer, so the &ctx passed at the call sites is EVP_MD_CTX** -- Init
+   allocates it, Final digests and frees it. */
+#include <openssl/evp.h>
+#define HashMD5Context EVP_MD_CTX *
+/* EVP_MD_CTX_new() allocates and can return NULL under OOM (the low-level
+   MD5_Init it replaces could not fail). Guard it the same way coucal guards
+   every other allocation -- coucal_assert() routes NULL through the fatal
+   handler / abort() -- so we never dereference a NULL ctx in EVP_DigestInit_ex. */
+#define HashMD5Init(CTX, FLAG) \
+  (coucal_assert(NULL, (*(CTX) = EVP_MD_CTX_new()) != NULL), \
+   EVP_DigestInit_ex(*(CTX), EVP_md5(), NULL))
+#define HashMD5Update(CTX, DATA, SIZE) EVP_DigestUpdate(*(CTX), DATA, SIZE)
+#define HashMD5Final(DIGEST, CTX) \
+  do { \
+    unsigned int md5len_ = 0; \
+    EVP_DigestFinal_ex(*(CTX), DIGEST, &md5len_); \
+    EVP_MD_CTX_free(*(CTX)); \
+  } while (0)
+#elif (defined(HTS_INTHASH_USES_FNV1))
+/* FNV-1 is computed inline in coucal_hash_data(); no external header needed. */
 #else
 #error "No hash method defined"
 #endif
@@ -122,6 +139,11 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
    long (e.g. Apple arm64), tripping clang -Wformat. PRIu64 matches uint64_t
    exactly everywhere; all UINT_64_FORMAT arguments are (uint64_t)-cast counts. */
 #define UINT_64_FORMAT PRIu64
+
+/* printf length modifier for a coucal_hashkey printed in hex (debug traces).
+   A bare "%x" only matches a 32-bit hashkey; on COUCAL_HASH_SIZE==64 the
+   argument is 64-bit, so those trace sites cast to uint64_t and use this. */
+#define UINT_64_HEX_FORMAT PRIx64
 
 /** Hashtable. **/
 struct struct_coucal {
@@ -908,9 +930,10 @@ static int coucal_add_item_(coucal hashtable, coucal_item item) {
     else {
       cuckoo_hash = initial_cuckoo_hash = item.hashes.hash1;
       coucal_trace(hashtable,
-                    "debug:collision with '%s' at %"UINT_64_FORMAT" (%x)", 
+                    "debug:collision with '%s' at %"UINT_64_FORMAT
+                    " (%"UINT_64_HEX_FORMAT")",
                      coucal_print_key(hashtable, item.name),
-                     (uint64_t) pos, cuckoo_hash);
+                     (uint64_t) pos, (uint64_t) cuckoo_hash);
     }
   }
 
@@ -919,9 +942,10 @@ static int coucal_add_item_(coucal hashtable, coucal_item item) {
     const size_t pos = coucal_hash_to_pos(hashtable, cuckoo_hash);
 
     coucal_trace(hashtable,
-                  "\tdebug:placing cuckoo '%s' at %"UINT_64_FORMAT" (%x)", 
+                  "\tdebug:placing cuckoo '%s' at %"UINT_64_FORMAT
+                  " (%"UINT_64_HEX_FORMAT")",
                   coucal_print_key(hashtable, item.name),
-                  (uint64_t) pos, cuckoo_hash);
+                  (uint64_t) pos, (uint64_t) cuckoo_hash);
 
     /* place at alternate free position ? */
     if (coucal_is_free(hashtable, pos)) {
@@ -988,22 +1012,24 @@ static int coucal_add_item_(coucal hashtable, coucal_item item) {
         const size_t pos1 = coucal_hash_to_pos(hashtable, item->hashes.hash1);
         const size_t pos2 = coucal_hash_to_pos(hashtable, item->hashes.hash2);
         coucal_crit(hashtable, 
-          "stash[%u]: key='%s' value='%s' pos1=%d pos2=%d hash1=%04x hash2=%04x",
+          "stash[%u]: key='%s' value='%s' pos1=%d pos2=%d"
+          " hash1=%04"UINT_64_HEX_FORMAT" hash2=%04"UINT_64_HEX_FORMAT,
           (int) i,
           hashtable->custom.print.key(hashtable->custom.print.arg, item->name),
           hashtable->custom.print.value(hashtable->custom.print.arg, item->value),
           (int) pos1, (int) pos2,
-          item->hashes.hash1, item->hashes.hash2);
+          (uint64_t) item->hashes.hash1, (uint64_t) item->hashes.hash2);
         if (!coucal_is_free(hashtable, pos1)) {
           coucal_item *const item = &hashtable->items[pos1];
           const size_t pos1 = coucal_hash_to_pos(hashtable, item->hashes.hash1);
           const size_t pos2 = coucal_hash_to_pos(hashtable, item->hashes.hash2);
           coucal_crit(hashtable, 
-            "\t.. collisionning with key='%s' value='%s' pos1=%d pos2=%d hash1=%04x hash2=%04x",
+            "\t.. collisionning with key='%s' value='%s' pos1=%d pos2=%d"
+            " hash1=%04"UINT_64_HEX_FORMAT" hash2=%04"UINT_64_HEX_FORMAT,
             hashtable->custom.print.key(hashtable->custom.print.arg, item->name),
             hashtable->custom.print.value(hashtable->custom.print.arg, item->value),
             (int) pos1, (int) pos2,
-            item->hashes.hash1, item->hashes.hash2);
+            (uint64_t) item->hashes.hash1, (uint64_t) item->hashes.hash2);
         } else {
           coucal_crit(hashtable, "\t.. collisionning with a free slot (%d)!", (int) pos1);
         }
@@ -1012,11 +1038,12 @@ static int coucal_add_item_(coucal hashtable, coucal_item item) {
           const size_t pos1 = coucal_hash_to_pos(hashtable, item->hashes.hash1);
           const size_t pos2 = coucal_hash_to_pos(hashtable, item->hashes.hash2);
           coucal_crit(hashtable, 
-            "\t.. collisionning with key='%s' value='%s' pos1=%d pos2=%d hash1=%04x hash2=%04x",
+            "\t.. collisionning with key='%s' value='%s' pos1=%d pos2=%d"
+            " hash1=%04"UINT_64_HEX_FORMAT" hash2=%04"UINT_64_HEX_FORMAT,
             hashtable->custom.print.key(hashtable->custom.print.arg, item->name),
             hashtable->custom.print.value(hashtable->custom.print.arg, item->value),
             (int) pos1, (int) pos2,
-            item->hashes.hash1, item->hashes.hash2);
+            (uint64_t) item->hashes.hash1, (uint64_t) item->hashes.hash2);
         } else {
           coucal_crit(hashtable, "\t.. collisionning with a free slot (%d)!", (int) pos2);
         }
