@@ -1,0 +1,16 @@
+# Formatting for NEW / changed code only. The existing tree is hand-formatted,
+# predates clang-format, and does not round-trip (idiosyncratic `for(` spacing
+# and spaces before `;` in for-loops), so CI checks only the lines a change
+# touches -- never the whole tree. See the `format` job in
+# .github/workflows/ci.yml.
+#
+# LLVM base already matches coucal's 2-space indent, 80-column limit, attached
+# braces and right-aligned pointers; the overrides below pin its remaining
+# conventions.
+BasedOnStyle: LLVM
+SortIncludes: false                        # includes are manually ordered
+SpaceAfterCStyleCast: true                 # "(void) arg", not "(void)arg"
+AllowShortIfStatementsOnASingleLine: false
+AllowShortBlocksOnASingleLine: Never
+AllowShortFunctionsOnASingleLine: None
+AllowShortLoopsOnASingleLine: false
