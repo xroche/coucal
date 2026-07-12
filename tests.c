@@ -242,8 +242,274 @@ static int coucal_test_high_bytes(void) {
   return EXIT_SUCCESS;
 }
 
+/* Fail the current test function, printing the offending expression. */
+#define CHECK(COND) do {                                                \
+    if (!(COND)) {                                                      \
+      fprintf(stderr, "CHECK failed: %s (%s:%d)\n",                     \
+              #COND, __FILE__, __LINE__);                               \
+      return EXIT_FAILURE;                                              \
+    }                                                                   \
+  } while (0)
+
+/* Coverage of the public read/write/enumerate API surface that the big
+   stress benchmark above does not touch. Assertions follow coucal.h's
+   documented contract, except coucal_inc/coucal_dec, whose header text is a
+   stale copy of coucal_write's ("non-zero if added"): the implementation
+   returns the new counter value, so we assert the unambiguous stored value
+   rather than the return. */
+static int coucal_test_api(void) {
+  coucal h = coucal_new(0);
+  intptr_t iv;
+  coucal_value val;
+  coucal_value out;
+  void *pv;
+  int i;
+
+  CHECK(coucal_created(h));
+  CHECK(coucal_hash_size() == COUCAL_HASH_SIZE);
+  CHECK(coucal_nitems(h) == 0);
+
+  /* write / replace / read / exists / get_intptr */
+  CHECK(coucal_write(h, "alpha", 111) != 0);   /* added   */
+  CHECK(coucal_write(h, "alpha", 222) == 0);   /* replaced */
+  CHECK(coucal_exists(h, "alpha"));
+  CHECK(!coucal_exists(h, "absent"));
+  CHECK(coucal_read(h, "alpha", &iv) && iv == 222);
+  CHECK(coucal_get_intptr(h, "alpha") == 222);
+  CHECK(coucal_get_intptr(h, "absent") == 0);
+  CHECK(coucal_nitems(h) == 1);
+
+  /* value-union read/write */
+  val.intg = 4242;
+  CHECK(coucal_write_value(h, "v", val) != 0);
+  CHECK(coucal_read_value(h, "v", &out) && out.intg == 4242);
+
+  /* fetch a mutable value pointer and change it in place */
+  {
+    coucal_value *p = coucal_fetch_value(h, "v");
+    CHECK(p != NULL && p->intg == 4242);
+    p->intg = 99;
+  }
+  CHECK(coucal_get_intptr(h, "v") == 99);
+  CHECK(coucal_fetch_value(h, "absent") == NULL);
+
+  /* pointer variants */
+  CHECK(coucal_write_pvoid(h, "ptr", (void *) "hello") != 0);
+  CHECK(coucal_get_pvoid(h, "ptr") != NULL);
+  CHECK(strcmp((const char *) coucal_get_pvoid(h, "ptr"), "hello") == 0);
+  CHECK(coucal_read_pvoid(h, "ptr", &pv) && pv != NULL);
+  CHECK(coucal_get_pvoid(h, "absent") == NULL);
+  coucal_add_pvoid(h, "ptr2", (void *) "world");   /* alias to write_pvoid */
+  CHECK(coucal_get_pvoid(h, "ptr2") != NULL);
+
+  /* precomputed-hash fetch must agree with the by-name fetch */
+  {
+    coucal_hashkeys hk = coucal_calc_hashes(h, "alpha");
+    coucal_value *p = coucal_fetch_value_hashes(h, "alpha", &hk);
+    CHECK(p != NULL && p->intg == 222);
+  }
+
+  /* inc/dec: assert the resulting stored value (see note above) */
+  CHECK(!coucal_exists(h, "cnt"));
+  (void) coucal_inc(h, "cnt");
+  CHECK(coucal_get_intptr(h, "cnt") == 1);   /* created at 1 */
+  (void) coucal_inc(h, "cnt");
+  CHECK(coucal_get_intptr(h, "cnt") == 2);
+  (void) coucal_dec(h, "cnt");
+  CHECK(coucal_get_intptr(h, "cnt") == 1);
+
+  /* remove semantics */
+  CHECK(coucal_remove(h, "alpha") != 0);
+  CHECK(!coucal_exists(h, "alpha"));
+  CHECK(coucal_remove(h, "alpha") == 0);     /* already gone */
+
+  /* housekeeping accessors */
+  CHECK(coucal_memory_size(h) > 0);
+  CHECK(coucal_get_name(h) == NULL);
+  coucal_set_name(h, "mytable");
+  CHECK(coucal_get_name(h) != NULL
+        && strcmp(coucal_get_name(h), "mytable") == 0);
+
+  coucal_delete(&h);
+  CHECK(h == NULL);   /* coucal_delete nulls the caller's pointer */
+
+  /* enumeration must visit every entry exactly once, with correct values */
+  h = coucal_new(0);
+  for (i = 0; i < 10; i++) {
+    char b[16];
+    snprintf(b, sizeof(b), "e%d", i);
+    coucal_write(h, b, (intptr_t) (i + 1000));
+  }
+  {
+    struct_coucal_enum e = coucal_enum_new(h);
+    coucal_item *it;
+    int seen[10];
+    int count = 0;
+    memset(seen, 0, sizeof(seen));
+    while ((it = coucal_enum_next(&e)) != NULL) {
+      int id = -1;
+      CHECK(sscanf((const char *) it->name, "e%d", &id) == 1
+            && id >= 0 && id < 10);
+      CHECK(it->value.intg == (intptr_t) (id + 1000));
+      CHECK(!seen[id]);
+      seen[id] = 1;
+      count++;
+    }
+    CHECK(count == 10);
+    for (i = 0; i < 10; i++) {
+      CHECK(seen[i]);
+    }
+  }
+  coucal_delete(&h);
+  return EXIT_SUCCESS;
+}
+
+/* The value free-handler must fire exactly once per value that leaves the
+   table -- on replace (old value), on remove, and on delete (survivors) --
+   and never otherwise. A miscount, or a run flagged by the leak sanitizer,
+   fails the test. */
+static unsigned g_freed;
+static void test_free_handler(coucal_opaque arg, coucal_value value) {
+  (void) arg;
+  g_freed++;
+  free(value.ptr);
+}
+
+static int coucal_test_value_handler(void) {
+  coucal h = coucal_new(0);
+  int i;
+
+  g_freed = 0;
+  coucal_value_set_value_handler(h, test_free_handler, NULL);
+
+  /* five heap-owned values; nothing freed yet */
+  for (i = 0; i < 5; i++) {
+    char b[16];
+    int *p = (int *) malloc(sizeof(*p));
+    CHECK(p != NULL);
+    *p = i;
+    snprintf(b, sizeof(b), "h%d", i);
+    coucal_write_pvoid(h, b, p);
+  }
+  CHECK(g_freed == 0);
+
+  /* replacing h0 frees its previous value */
+  {
+    int *p = (int *) malloc(sizeof(*p));
+    CHECK(p != NULL);
+    *p = 42;
+    coucal_write_pvoid(h, "h0", p);
+  }
+  CHECK(g_freed == 1);
+
+  /* removing h1 frees its value */
+  CHECK(coucal_remove(h, "h1") != 0);
+  CHECK(g_freed == 2);
+
+  /* deleting frees the four survivors (h0's replacement, h2, h3, h4) */
+  coucal_delete(&h);
+  CHECK(g_freed == 6);
+  return EXIT_SUCCESS;
+}
+
+/* Differential test: drive coucal and a trivial reference model with the same
+   deterministic pseudo-random op stream and assert they never diverge. The
+   key space is bounded so inserts, replaces, removes and lookups all collide
+   heavily. The (bytes -> ops) shape is reused as the libFuzzer harness core. */
+static uint32_t oracle_rng;
+static uint32_t oracle_next(void) {
+  oracle_rng = oracle_rng * 1103515245u + 12345u;
+  return oracle_rng >> 1;
+}
+
+static int coucal_test_oracle(void) {
+#define ORACLE_KEYS 512u
+#define ORACLE_OPS  20000
+  coucal h = coucal_new(0);
+  intptr_t *mval = (intptr_t *) calloc(ORACLE_KEYS, sizeof(*mval));
+  unsigned char *mpresent = (unsigned char *) calloc(ORACLE_KEYS, 1);
+  size_t model_count = 0;
+  int i;
+
+  CHECK(mval != NULL && mpresent != NULL);
+  oracle_rng = 0x01234567u;
+
+  for (i = 0; i < ORACLE_OPS; i++) {
+    uint32_t id = oracle_next() % ORACLE_KEYS;
+    uint32_t op = oracle_next() % 3u;
+    char key[24];
+    snprintf(key, sizeof(key), "okey_%u", (unsigned) id);
+
+    if (op == 0u) {                       /* insert or replace */
+      intptr_t v = (intptr_t) (oracle_next() | 1u);   /* keep it non-zero */
+      int added = coucal_write(h, key, v);
+      if (!mpresent[id]) {
+        CHECK(added != 0);
+        mpresent[id] = 1;
+        model_count++;
+      } else {
+        CHECK(added == 0);
+      }
+      mval[id] = v;
+    } else if (op == 1u) {                /* remove */
+      int removed = coucal_remove(h, key);
+      if (mpresent[id]) {
+        CHECK(removed != 0);
+        mpresent[id] = 0;
+        model_count--;
+      } else {
+        CHECK(removed == 0);
+      }
+    } else {                             /* lookup */
+      intptr_t got;
+      CHECK((coucal_exists(h, key) != 0) == (mpresent[id] != 0));
+      if (mpresent[id]) {
+        CHECK(coucal_read(h, key, &got) && got == mval[id]);
+      }
+    }
+    CHECK(coucal_nitems(h) == model_count);
+  }
+
+  /* enumeration must reproduce the model set exactly */
+  {
+    struct_coucal_enum e = coucal_enum_new(h);
+    unsigned char *check = (unsigned char *) calloc(ORACLE_KEYS, 1);
+    coucal_item *it;
+    size_t seen = 0;
+    CHECK(check != NULL);
+    while ((it = coucal_enum_next(&e)) != NULL) {
+      unsigned id = ORACLE_KEYS;
+      CHECK(sscanf((const char *) it->name, "okey_%u", &id) == 1
+            && id < ORACLE_KEYS);
+      CHECK(mpresent[id]);
+      CHECK(!check[id]);
+      check[id] = 1;
+      CHECK(it->value.intg == mval[id]);
+      seen++;
+    }
+    CHECK(seen == model_count);
+    free(check);
+  }
+
+  coucal_delete(&h);
+  free(mval);
+  free(mpresent);
+  return EXIT_SUCCESS;
+#undef ORACLE_KEYS
+#undef ORACLE_OPS
+}
+
 int main(int argc, char **argv) {
   if (coucal_test_high_bytes() != EXIT_SUCCESS) {
+    return EXIT_FAILURE;
+  }
+  if (coucal_test_api() != EXIT_SUCCESS) {
+    return EXIT_FAILURE;
+  }
+  if (coucal_test_value_handler() != EXIT_SUCCESS) {
+    return EXIT_FAILURE;
+  }
+  if (coucal_test_oracle() != EXIT_SUCCESS) {
     return EXIT_FAILURE;
   }
   if (argc == 2) {
