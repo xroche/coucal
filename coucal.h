@@ -296,8 +296,11 @@ COUCAL_EXTERN void coucal_value_is_malloc(coucal hashtable, int flag);
 
 /**
  * Set handlers for values.
- * free: this handler will be called when a value is to be removed from
- * the hashtable. if NULL, values won't be free'd.
+ * free: this handler is called exactly once for every value that leaves the
+ * hashtable: when its entry is removed (coucal_remove), when a new write for
+ * the same key replaces it (the old value is freed), and for every remaining
+ * entry when the hashtable is destroyed (coucal_delete). if NULL, values
+ * won't be free'd.
  * arg: opaque custom argument to be used by functions.
  * Handler(s) MUST NOT be changed once elements have been added.
  **/
@@ -438,14 +441,14 @@ COUCAL_EXTERN void coucal_add(coucal hashtable, coucal_key_const name,
 /**
  * Increment an entry value in the hashtable
  * (or create a new entry with value 1 if it does not yet exist)
- * Return non-zero value if the entry was added, zero if it was changed.
+ * Return the entry's new (incremented) value.
  **/
 COUCAL_EXTERN int coucal_inc(coucal hashtable, coucal_key_const name);
 
 /**
- * Decrement an entry value in the hashtable 
+ * Decrement an entry value in the hashtable
  * (or create a new entry with value -1 if it does not yet exist)
- * Return non-zero value if the entry was added, zero if it was changed.
+ * Return the entry's new (decremented) value.
  **/
 COUCAL_EXTERN int coucal_dec(coucal hashtable, coucal_key_const name);
 
@@ -480,7 +483,9 @@ COUCAL_EXTERN int coucal_remove(coucal hashtable, coucal_key_const name);
 
 /**
  * Return a new enumerator.
- * Note: deleting entries is safe while enumerating, but adding entries 
+ * A full enumeration (calling coucal_enum_next() until it returns NULL) visits
+ * every entry currently in the hashtable exactly once, in an unspecified order.
+ * Note: deleting entries is safe while enumerating, but adding entries
  * lead to undefined enumeration behavior (yet safe).
  **/
 COUCAL_EXTERN struct_coucal_enum coucal_enum_new(coucal hashtable);
