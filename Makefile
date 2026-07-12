@@ -19,9 +19,26 @@ PREFIX  ?= /usr/local
 # injecting sanitizer flags.
 CFLAGS  ?= -O3 -g
 
-override CPPFLAGS += -D_REENTRANT -D_GNU_SOURCE -DHTS_INTHASH_USES_MURMUR
+# --- Hash backend (overridable) ----------------------------------------------
+# Which hash function coucal compiles in, and the hash-key width. The default
+# (MurmurHash, 32-bit) is self-contained; CI overrides these to exercise the
+# other backends and the 64-bit key path so a config only the default build
+# touches cannot rot (see .github/workflows/ci.yml).
+#   HASH_BACKEND: MURMUR (default) | FNV1 | OPENSSL_MD5 | MD5
+#   HASH_SIZE:    32 (default) | 64
+HASH_BACKEND ?= MURMUR
+HASH_SIZE    ?= 32
+
+override CPPFLAGS += -D_REENTRANT -D_GNU_SOURCE \
+                    -DHTS_INTHASH_USES_$(HASH_BACKEND) \
+                    -DCOUCAL_HASH_SIZE=$(HASH_SIZE)
 override CFLAGS   += -fPIC -pthread \
                     -W -Wall -Wextra -Werror -Wno-unused-function
+
+# The OpenSSL MD5 backend links against libcrypto (the others are self-contained).
+ifeq ($(HASH_BACKEND),OPENSSL_MD5)
+  override LDLIBS += -lcrypto
+endif
 
 # --- Platform shared-library wiring ------------------------------------------
 UNAME_S := $(shell uname -s)
@@ -58,14 +75,14 @@ $(STATICLIB): $(LIBOBJ)
 	$(AR) rcs $@ $^
 
 $(SHLIB): $(LIBOBJ)
-	$(CC) $(CFLAGS) $(SOFLAGS) $(LIBOBJ) -o $@ $(LDFLAGS) $(SOLIBS)
+	$(CC) $(CFLAGS) $(SOFLAGS) $(LIBOBJ) -o $@ $(LDFLAGS) $(SOLIBS) $(LDLIBS)
 
 # tests/sample link the static archive: no LD_LIBRARY_PATH, identical run on
 # Linux and macOS.
 tests: tests.o $(STATICLIB)
-	$(CC) $(CFLAGS) $< $(STATICLIB) -o $@ $(LDFLAGS)
+	$(CC) $(CFLAGS) $< $(STATICLIB) -o $@ $(LDFLAGS) $(LDLIBS)
 sample: sample.o $(STATICLIB)
-	$(CC) $(CFLAGS) $< $(STATICLIB) -o $@ $(LDFLAGS)
+	$(CC) $(CFLAGS) $< $(STATICLIB) -o $@ $(LDFLAGS) $(LDLIBS)
 
 check test: tests
 	./tests 100000
