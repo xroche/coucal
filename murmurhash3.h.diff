@@ -1,6 +1,6 @@
 --- murmurhash3.h.orig
 +++ murmurhash3.h
-@@ -7,16 +7,33 @@
+@@ -7,16 +7,34 @@
  // compile and run any of them on any platform, but your performance with the
  // non-native version will be less than optimal.
  
@@ -17,6 +17,7 @@
 +#else
  #include <stdint.h>
 +#endif
++#include <stddef.h> /* ptrdiff_t, used by getblock32's signed offset */
 +#include <string.h>
  
  static uint32_t rotl32 ( uint32_t x, int8_t r )
@@ -31,12 +32,12 @@
 +  /* memcpy the 32-bit block: defined on any alignment, and lowered to the same
 +     single load as p[i] on hosts that tolerate unaligned access. */
 +  uint32_t v;
-+  memcpy(&v, p + (size_t)i * 4, sizeof(v));
++  memcpy(&v, p + (ptrdiff_t) i * 4, sizeof(v));
 +  return v;
  }
  static uint32_t fmix32 ( uint32_t h )
  {
-@@ -44,7 +61,7 @@
+@@ -44,7 +62,7 @@
    const uint32_t c3 = 0x38b34ae5; 
    const uint32_t c4 = 0xa1e38b93;
  
@@ -45,7 +46,7 @@
    int i;
    
    for(i = -nblocks; i; i++)
-@@ -79,31 +96,40 @@
+@@ -79,31 +97,40 @@
    uint32_t k3 = 0;
    uint32_t k4 = 0;
  
