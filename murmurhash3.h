@@ -20,6 +20,7 @@ typedef unsigned __int64 uint64_t;
 #else
 #include <stdint.h>
 #endif
+#include <stddef.h> /* ptrdiff_t, used by getblock32's signed offset */
 #include <string.h>
 
 static uint32_t rotl32 ( uint32_t x, int8_t r )
@@ -32,7 +33,7 @@ static uint32_t getblock32 ( const uint8_t * p, int i )
   /* memcpy the 32-bit block: defined on any alignment, and lowered to the same
      single load as p[i] on hosts that tolerate unaligned access. */
   uint32_t v;
-  memcpy(&v, p + (size_t)i * 4, sizeof(v));
+  memcpy(&v, p + (ptrdiff_t)i * 4, sizeof(v));
   return v;
 }
 static uint32_t fmix32 ( uint32_t h )
