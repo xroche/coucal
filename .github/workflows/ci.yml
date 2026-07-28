@@ -33,7 +33,7 @@ jobs:
           - { arch: arm64,  runner: ubuntu-24.04-arm, cc: gcc }
           - { arch: arm64,  runner: ubuntu-24.04-arm, cc: clang }
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install toolchain
         run: |
@@ -50,7 +50,7 @@ jobs:
     name: sanitizers (asan+ubsan, gcc)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install toolchain
         run: |
@@ -83,7 +83,7 @@ jobs:
     name: build+test (linux i386, gcc -m32)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install 32-bit toolchain
         run: |
@@ -99,9 +99,9 @@ jobs:
 
   macos:
     name: build+test (macOS arm64, clang)
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # The Makefile is portable (it switches to a .dylib link on Darwin), so
       # macOS runs the same `make all check`. This exercises the code on a
@@ -127,7 +127,7 @@ jobs:
           - { backend: OPENSSL_MD5, size: 32 }
           - { backend: OPENSSL_MD5, size: 64 }
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install toolchain
         run: |
@@ -148,7 +148,7 @@ jobs:
     name: config (bundled MD5, compile-only)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install toolchain
         run: |
@@ -173,7 +173,7 @@ jobs:
     name: msan (MemorySanitizer, clang)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install toolchain
         run: |
@@ -199,7 +199,7 @@ jobs:
     name: fuzz (libFuzzer corpus replay, clang)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install toolchain
         run: |
@@ -222,7 +222,7 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
