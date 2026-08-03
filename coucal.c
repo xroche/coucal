@@ -714,8 +714,7 @@ static coucal_key coucal_dup_name_internal(coucal hashtable,
   if (hashtable->pool.capacity - hashtable->pool.size < len) {
     size_t capacity;
 
-    /* growing the pool releases the block a pooled key points into (compaction
-       may also relocate it, or the string it is a suffix of): copy it aside */
+    /* growing the pool may relocate or free the block `name` points into */
     if (coucal_is_pooled(hashtable, name)) {
       staged = (char *) malloc(len);
       if (staged == NULL) {

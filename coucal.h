@@ -167,8 +167,7 @@ typedef struct coucal_hashkeys {
 
 /** Item holding a value. **/
 struct coucal_item {
-  /** Key, owned by the hashtable. Only valid until the next mutating call,
-      which may relocate or release it. **/
+  /** Key, owned by the hashtable ; valid only until the next mutating call. **/
   coucal_key name;
 
   /** Value. **/
@@ -493,8 +492,8 @@ COUCAL_EXTERN struct_coucal_enum coucal_enum_new(coucal hashtable);
 
 /**
  * Enumerate the next entry.
- * The returned item, and its name, are only valid until the next mutating call.
- * Such a name may still be handed back to this library as a key.
+ * The returned item and its name are valid only until the next mutating call,
+ * though the name may still be passed back to this library as a key.
  **/
 COUCAL_EXTERN coucal_item *coucal_enum_next(struct_coucal_enum * e);
 
