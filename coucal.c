@@ -276,6 +276,9 @@ static void NAME(const coucal hashtable, const char *format, ...) { \
   coucal_log(hashtable, LEVEL, format, args); \
   va_end(args); \
 }
+/* a compiled-out level must not evaluate its args ; -Wformat still applies */
+#define COUCAL_NEVER while (0)
+#define COUCAL_NO_LOG COUCAL_NEVER coucal_nolog
 #if 0
 /* Verbose. */
 DECLARE_LOG_FUNCTION(coucal_crit, coucal_log_critical)
@@ -288,22 +291,22 @@ DECLARE_LOG_FUNCTION(coucal_trace, coucal_log_trace)
 DECLARE_LOG_FUNCTION(coucal_crit, coucal_log_critical)
 DECLARE_LOG_FUNCTION(coucal_warning, coucal_log_warning)
 DECLARE_LOG_FUNCTION(coucal_info, coucal_log_info)
-#define coucal_debug coucal_log
-#define coucal_trace coucal_nolog
+DECLARE_LOG_FUNCTION(coucal_debug, coucal_log_debug)
+#define coucal_trace COUCAL_NO_LOG
 #else
 /* No logging except stats and critical. */
 DECLARE_LOG_FUNCTION(coucal_crit, coucal_log_critical)
 DECLARE_LOG_FUNCTION(coucal_warning, coucal_log_warning)
 DECLARE_LOG_FUNCTION(coucal_info, coucal_log_info)
-#define coucal_debug coucal_nolog
-#define coucal_trace coucal_nolog
+#define coucal_debug COUCAL_NO_LOG
+#define coucal_trace COUCAL_NO_LOG
 #endif
 
 /* 2**X */
 #define POW2(X) ( (size_t) 1 << (X) )
 
-/* the empty string for the string pool */
-static char the_empty_string[1] = { 0 };
+/* the empty string for the string pool ; shared process-wide, hence const */
+static const char the_empty_string[1] = {0};
 
 /* global assertion handler */
 static t_coucal_asserthandler global_assert_handler = NULL;
@@ -359,11 +362,17 @@ static INTHASH_INLINE void coucal_nolog(const coucal hashtable,
 }
 
 const char* coucal_get_name(coucal hashtable) {
-  return hashtable->custom.error.name;
+  /* the assertion path calls this with a NULL table (see HashMD5Init) */
+  return hashtable != NULL ? hashtable->custom.error.name : NULL;
 }
 
 static void coucal_log_stats(coucal hashtable) {
   const char *const name = coucal_get_name(hashtable);
+  const double avg_moved =
+      hashtable->stats.add_count != 0
+          ? (double) hashtable->stats.cuckoo_moved / hashtable->stats.add_count
+          : 0.0;
+  /* clang-format off */
   coucal_info(hashtable, "hashtable %s%s%ssummary: "
                "size=%"UINT_64_FORMAT" (lg2=%"UINT_64_FORMAT") "
                "used=%"UINT_64_FORMAT" "
@@ -396,12 +405,13 @@ static void coucal_log_stats(coucal hashtable) {
                (uint64_t) hashtable->stats.cuckoo_moved,
                (uint64_t) hashtable->stats.stash_added,
                (uint64_t) hashtable->stats.max_stash_size,
-               (double) hashtable->stats.cuckoo_moved / (double) hashtable->stats.add_count,
+               avg_moved,
                (uint64_t) hashtable->stats.rehash_count,
                (uint64_t) hashtable->stats.pool_compact_count,
                (uint64_t) hashtable->stats.pool_realloc_count,
                (uint64_t) coucal_memory_size(hashtable)
                );
+  /* clang-format on */
 }
 
 /* default hash function when key is a regular C-string */
@@ -417,10 +427,17 @@ coucal_hashkeys coucal_hash_data(const void *data_, size_t size) {
 #endif
     coucal_hashkeys hashes;
   } u;
+  size_t offset;
 
-  /* compute MD5 */
+  /* compute MD5 ; fed by chunks, as the update size is an unsigned int */
   HashMD5Init(&ctx, 0);
-  HashMD5Update(&ctx, data, (unsigned int) size);
+  for (offset = 0; offset < size;) {
+    const size_t remaining = size - offset;
+    const unsigned int chunk =
+        remaining <= 0x10000000 ? (unsigned int) remaining : 0x10000000;
+    HashMD5Update(&ctx, data + offset, chunk);
+    offset += chunk;
+  }
   HashMD5Final(u.md5digest, &ctx);
 
 #if (COUCAL_HASH_SIZE == 32)
@@ -440,7 +457,7 @@ coucal_hashkeys coucal_hash_data(const void *data_, size_t size) {
     uint32_t result[4];
     coucal_hashkeys hashes;
   } u;
-  MurmurHash3_x86_128(data, (const int) size, 42, &u.result);
+  MurmurHash3_x86_128(data, size, 42, &u.result);
 
 #if (COUCAL_HASH_SIZE == 32)
   /* mix mix mix */
@@ -689,23 +706,47 @@ static void coucal_realloc_pool(coucal hashtable, size_t capacity) {
                 (uint64_t) count, (uint64_t) hashtable->pool.capacity);
 }
 
+/* is this key stored inside the string pool ? */
+static INTHASH_INLINE int coucal_is_pooled(const coucal hashtable,
+                                           const char *name) {
+  const uintptr_t base = (uintptr_t) hashtable->pool.buffer;
+  const uintptr_t addr = (uintptr_t) name;
+  return hashtable->pool.buffer != NULL && addr >= base &&
+         addr - base < hashtable->pool.capacity;
+}
+
 static coucal_key coucal_dup_name_internal(coucal hashtable,
                                            coucal_key_const name_) {
-  const char *const name = (const char*) name_;
+  const char *name = (const char *) name_;
   const size_t len = strlen(name) + 1;
+  char *staged = NULL;
   char *s;
 
   /* the pool does not allow empty strings for safety purpose ; handhe that
     (keys are being emptied when free'd to detect duplicate free) */
   if (len == 1) {
-    coucal_assert(hashtable, the_empty_string[0] == '\0');
-    return the_empty_string;
+    return (coucal_key) the_empty_string;
   }
 
   /* expand pool capacity */
   coucal_assert(hashtable, hashtable->pool.size <= hashtable->pool.capacity);
   if (hashtable->pool.capacity - hashtable->pool.size < len) {
     size_t capacity;
+
+    /* growing the pool may relocate or free the block `name` points into */
+    if (coucal_is_pooled(hashtable, name)) {
+      staged = (char *) malloc(len);
+      if (staged == NULL) {
+        coucal_crit(hashtable,
+                    "** hashtable key staging error: could not allocate "
+                    "%" UINT_64_FORMAT " bytes",
+                    (uint64_t) len);
+        coucal_assert(hashtable, !"hashtable key staging error");
+      }
+      memcpy(staged, name, len);
+      name = staged;
+    }
+
     for(capacity = MIN_POOL_CAPACITY ; capacity < hashtable->pool.size + len
       ; capacity <<= 1) ;
     coucal_assert(hashtable, hashtable->pool.size < capacity);
@@ -718,6 +759,10 @@ static coucal_key coucal_dup_name_internal(coucal hashtable,
   memcpy(s, name, len);
   hashtable->pool.size += len;
   hashtable->pool.used += len;
+
+  if (staged != NULL) {
+    free(staged);
+  }
 
   return s;
 }
@@ -738,7 +783,6 @@ static void coucal_free_key_internal(coucal hashtable, coucal_key name_) {
 
   /* see coucal_dup_name_internal() handling */
   if (len == 1 && name == the_empty_string) {
-    coucal_assert(hashtable, the_empty_string[0] == '\0');
     return ;
   }
 
@@ -1139,8 +1183,10 @@ int coucal_write_value(coucal hashtable, coucal_key_const name,
       const size_t prev_size = half_size * 2;
       const size_t prev_alloc_size = prev_size*sizeof(coucal_item);
 
-      /* size after doubling it */
-      const size_t alloc_size = prev_alloc_size * 2;
+      /* size after doubling it ; a wrap here would silently under-allocate */
+      const int size_overflow =
+          prev_size > ((size_t) -1) / (2 * sizeof(coucal_item));
+      const size_t alloc_size = size_overflow ? 0 : prev_alloc_size * 2;
 
       /* log stash issues */
       if (hashtable->stash.size >= half_stash_size 
@@ -1158,6 +1204,7 @@ int coucal_write_value(coucal hashtable, coucal_key_const name,
       /* realloc */
       hashtable->lg_size++;
       coucal_assert(hashtable, coucal_is_acceptable_pow2(hashtable->lg_size));
+      coucal_assert(hashtable, !size_overflow);
       hashtable->items = 
         (coucal_item *) realloc(hashtable->items, alloc_size);
       if (hashtable->items == NULL) {
@@ -1399,11 +1446,13 @@ int coucal_remove(coucal hashtable, coucal_key_const name) {
 }
 
 int coucal_readptr(coucal hashtable, coucal_key_const name, intptr_t * value) {
+  intptr_t discarded;
+  intptr_t *const dest = (value != NULL) ? value : &discarded;
   int ret;
 
-  *value = 0;
-  ret = coucal_read(hashtable, name, value);
-  if (*value == 0)
+  *dest = 0;
+  ret = coucal_read(hashtable, name, dest);
+  if (*dest == 0)
     ret = 0;
   return ret;
 }
@@ -1418,21 +1467,26 @@ intptr_t coucal_get_intptr(coucal hashtable, coucal_key_const name) {
 
 static INTHASH_INLINE size_t coucal_get_pow2(size_t initial_size) {
   size_t size;
-  for(size = MIN_LG_SIZE 
-    ; size <= COUCAL_HASH_SIZE && POW2(size) < initial_size
-    ; size++) ;
+  /* short-circuit: POW2() must never shift by the width of size_t */
+  for (size = MIN_LG_SIZE;
+       coucal_is_acceptable_pow2(size) && POW2(size) < initial_size; size++)
+    ;
   return size;
 }
 
 coucal coucal_new(size_t initial_size) {
   const size_t lg_size = coucal_get_pow2(initial_size);
-  const int lg_valid = coucal_is_acceptable_pow2(lg_size);
-  coucal hashtable = lg_valid 
-    ? (coucal) calloc(1, sizeof(struct_coucal)) : NULL;
-  coucal_item *const items = 
-    (coucal_item *) calloc(POW2(lg_size), sizeof(coucal_item));
+  coucal hashtable;
+  coucal_item *items;
 
-  if (lg_valid && items != NULL && hashtable != NULL) {
+  if (!coucal_is_acceptable_pow2(lg_size)) {
+    return NULL;
+  }
+
+  hashtable = (coucal) calloc(1, sizeof(struct_coucal));
+  items = (coucal_item *) calloc(POW2(lg_size), sizeof(coucal_item));
+
+  if (items != NULL && hashtable != NULL) {
     hashtable->lg_size = lg_size;
     hashtable->items = items;
     hashtable->used = 0;
@@ -1560,20 +1614,28 @@ void coucal_delete(coucal *phashtable) {
       if (hashtable->items != NULL) {
         /* we need to delete values */
         const size_t hash_size = POW2(hashtable->lg_size);
+        /* internal-pool names go away with the pool buffer below */
+        const int free_names = hashtable->custom.key.free != NULL;
         size_t i;
 
-        /* wipe hashtable values (not names) */
+        /* wipe hashtable values (and names, if custom-allocated) */
         for(i = 0 ; i < hash_size ; i++) {
           if (!coucal_is_free(hashtable, i)) {
             coucal_del_value(hashtable, i);
+            if (free_names) {
+              coucal_del_name(hashtable, &hashtable->items[i]);
+            }
           }
         }
 
-        /* wipe auxiliary stash values (not names) if any */
+        /* wipe stash values (and names); holes below extent are not live */
         for (i = 0; i < hashtable->stash.extent; i++) {
           coucal_item *const item = &hashtable->stash.items[i];
           if (item->name != NULL) {
             coucal_del_value_(hashtable, &item->value);
+            if (free_names) {
+              coucal_del_name(hashtable, item);
+            }
           }
         }
       }

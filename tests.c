@@ -147,7 +147,9 @@ static int coucal_test(const char *snum) {
         int result = 0;
         char buffer[256];
         const char *name;
-        const long expected = (long) i * 1664525 + 1013904223;
+        /* unsigned: this LCG overflows a 32-bit long on ILP32 */
+        const long expected =
+            (long) ((unsigned long) i * 1664525UL + 1013904223UL);
         if (strings == NULL) {
           snprintf(buffer, sizeof(buffer),
             "http://www.example.com/website/sample/for/hashtable/"
@@ -327,6 +329,7 @@ static int coucal_test_api(void) {
   /* housekeeping accessors */
   CHECK(coucal_memory_size(h) > 0);
   CHECK(coucal_get_name(h) == NULL);
+  CHECK(coucal_get_name(NULL) == NULL); /* the assertion path passes NULL */
   coucal_set_name(h, "mytable");
   CHECK(coucal_get_name(h) != NULL
         && strcmp(coucal_get_name(h), "mytable") == 0);
@@ -361,6 +364,117 @@ static int coucal_test_api(void) {
       CHECK(seen[i]);
     }
   }
+  coucal_delete(&h);
+  return EXIT_SUCCESS;
+}
+
+/* pool offsets below don't depend on hash backend or key width */
+#define ALIAS_DONOR_LEN 600
+#define ALIAS_FILLER_LEN 99
+
+/* look up the pooled key by content: enumeration order is hash-dependent */
+static const char *coucal_stored_key(coucal hashtable, const char *name) {
+  struct_coucal_enum e = coucal_enum_new(hashtable);
+  const coucal_item *item;
+
+  while ((item = coucal_enum_next(&e)) != NULL) {
+    if (strcmp((const char *) item->name, name) == 0) {
+      return (const char *) item->name;
+    }
+  }
+  return NULL;
+}
+
+/* builds a pool with holes so the next growth compacts rather than reallocs */
+static coucal coucal_build_holed_pool(const char *donor) {
+  coucal h = coucal_new(0);
+  char filler[ALIAS_FILLER_LEN + 1];
+  int i;
+
+  memset(filler, 'f', sizeof(filler) - 1);
+  filler[sizeof(filler) - 1] = '\0';
+
+  filler[0] = '0';
+  coucal_write(h, filler, 0);
+  coucal_write(h, donor, 1);
+  for (i = 1; i < 4; i++) {
+    filler[0] = (char) ('0' + i);
+    coucal_write(h, filler, i);
+  }
+  for (i = 0; i < 4; i++) {
+    filler[0] = (char) ('0' + i);
+    coucal_remove(h, filler);
+  }
+  return h;
+}
+
+/* forces pool growth via `aliased`; the gap to `donor` shows which path ran */
+static int coucal_check_aliased_write(coucal h, const char *donor,
+                                      const char *aliased) {
+  char expected[ALIAS_DONOR_LEN + 1];
+  const size_t donor_len = strlen(donor) + 1;
+  const char *stored_donor;
+  const char *stored_aliased;
+  size_t before;
+
+  CHECK(strlen(aliased) < sizeof(expected));
+  memcpy(expected, aliased, strlen(aliased) + 1);
+
+  before = coucal_memory_size(h);
+  CHECK(coucal_write(h, aliased, 42) != 0); /* added, so the dup path ran */
+  CHECK(coucal_memory_size(h) > before);    /* and it did grow the pool */
+
+  CHECK(coucal_exists(h, donor));
+  CHECK(coucal_exists(h, expected));
+  stored_donor = coucal_stored_key(h, donor);
+  stored_aliased = coucal_stored_key(h, expected);
+  CHECK(stored_donor != NULL && stored_aliased != NULL);
+  CHECK((size_t) (stored_aliased - stored_donor) == donor_len);
+  return EXIT_SUCCESS;
+}
+
+/* a pool-aliased key must survive the growth its own insertion triggers */
+static int coucal_test_pool_alias(void) {
+  char donor[ALIAS_DONOR_LEN + 1];
+  const char *stored;
+  coucal h;
+
+  memset(donor, 'd', ALIAS_DONOR_LEN);
+  donor[ALIAS_DONOR_LEN] = '\0';
+
+  /* realloc() growth: the pool has no holes, so compaction cannot be chosen */
+  h = coucal_new(0);
+  CHECK(coucal_write(h, donor, 1) != 0);
+  stored = coucal_stored_key(h, donor);
+  CHECK(stored != NULL);
+  CHECK(coucal_check_aliased_write(h, donor, stored + 1) == EXIT_SUCCESS);
+  coucal_delete(&h);
+
+  /* compaction growth, aliasing a live key: the old pool is freed outright */
+  h = coucal_build_holed_pool(donor);
+  stored = coucal_stored_key(h, donor);
+  CHECK(stored != NULL);
+  CHECK(coucal_check_aliased_write(h, donor, stored + 1) == EXIT_SUCCESS);
+  coucal_delete(&h);
+
+  /* compaction growth, aliasing a dead filler's tail: nothing tracks it */
+  h = coucal_build_holed_pool(donor);
+  stored = coucal_stored_key(h, donor);
+  CHECK(stored != NULL);
+  CHECK(coucal_check_aliased_write(h, donor, stored + ALIAS_DONOR_LEN + 4) ==
+        EXIT_SUCCESS);
+  coucal_delete(&h);
+
+  return EXIT_SUCCESS;
+}
+
+/* An out-of-range initial size is rejected, not shifted by the size_t width. */
+static int coucal_test_new_size(void) {
+  coucal h;
+
+  CHECK(coucal_new((size_t) -1) == NULL);
+  h = coucal_new(1024);
+  CHECK(coucal_write(h, "key", 1) != 0);
   coucal_delete(&h);
   return EXIT_SUCCESS;
 }
@@ -410,6 +524,280 @@ static int coucal_test_value_handler(void) {
   /* deleting frees the four survivors (h0's replacement, h2, h3, h4) */
   coucal_delete(&h);
   CHECK(g_freed == 6);
+  return EXIT_SUCCESS;
+}
+
+/* key free-handler: once per dup'd key, on remove/delete (survivors only) */
+static unsigned g_key_dups, g_key_frees;
+static size_t g_stash_size;
+static coucal_key test_key_dup(coucal_opaque arg, coucal_key_const name) {
+  (void) arg;
+  g_key_dups++;
+  return strdup((const char *) name);
+}
+static void test_key_free(coucal_opaque arg, coucal_key name) {
+  (void) arg;
+  g_key_frees++;
+  free(name);
+}
+
+/* three keys per group share two hash slots, so one lands in the stash */
+static coucal_hashkeys test_key_hash(coucal_opaque arg, coucal_key_const name) {
+  const int group = atoi((const char *) name + 1) / 3;
+  coucal_hashkeys k;
+  (void) arg;
+  k.hash1 = (coucal_hashkey) (group * 3 + 1);
+  k.hash2 = (coucal_hashkey) (group * 3 + 2);
+  return k;
+}
+
+/* coucal_delete() logs the summary: only public window onto stash.size */
+static void test_key_log(coucal_opaque arg, coucal_loglevel level,
+                         const char *format, va_list args) {
+  char line[1024];
+  const char *p;
+  (void) arg;
+  (void) level;
+  vsnprintf(line, sizeof(line), format, args);
+  p = strstr(line, " stash-size=");
+  if (p != NULL) {
+    g_stash_size = (size_t) atol(p + sizeof(" stash-size=") - 1);
+  }
+}
+
+static int coucal_test_key_handler(void) {
+#define KEY_HANDLER_KEYS 4096
+#define KEY_HANDLER_STASHED_KEYS 12
+  coucal h = coucal_new(0);
+  char b[16];
+  int i;
+
+  g_key_dups = 0;
+  g_key_frees = 0;
+  coucal_value_set_key_handler(h, test_key_dup, test_key_free, NULL, NULL,
+                               NULL);
+
+  /* enough keys to force rehashes */
+  for (i = 0; i < KEY_HANDLER_KEYS; i++) {
+    snprintf(b, sizeof(b), "k%d", i);
+    CHECK(coucal_write(h, b, i) != 0);
+  }
+  CHECK(g_key_dups == KEY_HANDLER_KEYS);
+  CHECK(g_key_frees == 0);
+
+  /* a write over an existing key keeps the stored key */
+  CHECK(coucal_write(h, "k0", -1) == 0);
+  CHECK(g_key_dups == KEY_HANDLER_KEYS);
+  CHECK(g_key_frees == 0);
+
+  CHECK(coucal_remove(h, "k1") != 0);
+  CHECK(g_key_frees == 1);
+
+  coucal_delete(&h);
+  CHECK(g_key_frees == g_key_dups);
+
+  /* same contract for stashed keys, which no backend populates reliably */
+  g_key_dups = 0;
+  g_key_frees = 0;
+  g_stash_size = 0;
+  h = coucal_new(0);
+  coucal_value_set_key_handler(h, test_key_dup, test_key_free, test_key_hash,
+                               NULL, NULL);
+  coucal_set_assert_handler(h, test_key_log, NULL, NULL);
+  for (i = 0; i < KEY_HANDLER_STASHED_KEYS; i++) {
+    snprintf(b, sizeof(b), "k%d", i);
+    CHECK(coucal_write(h, b, i) != 0);
+  }
+  coucal_delete(&h);
+  CHECK(g_stash_size != 0);
+  CHECK(g_key_frees == g_key_dups);
+  return EXIT_SUCCESS;
+#undef KEY_HANDLER_STASHED_KEYS
+#undef KEY_HANDLER_KEYS
+}
+
+static unsigned g_printed;
+static const char *test_print_key(coucal_opaque arg, coucal_key_const name) {
+  (void) arg;
+  g_printed++;
+  return (const char *) name;
+}
+static const char *test_print_value(coucal_opaque arg,
+                                    coucal_value_const value) {
+  (void) arg;
+  (void) value;
+  return "?";
+}
+
+static char g_logged[1024];
+static void test_log_handler(coucal_opaque arg, coucal_loglevel level,
+                             const char *format, va_list args) {
+  (void) arg;
+  (void) level;
+  vsnprintf(g_logged, sizeof(g_logged), format, args);
+}
+
+static int coucal_test_hardening(void) {
+  coucal h = coucal_new(0);
+  const char *moved;
+  unsigned long cuckoo_moved = 0;
+  int i;
+
+  /* compiled-out levels must not call the print handler */
+  g_printed = 0;
+  coucal_set_print_handler(h, test_print_key, test_print_value, NULL);
+  coucal_set_assert_handler(h, test_log_handler, NULL, NULL);
+  for (i = 0; i < 5000; i++) {
+    char b[24];
+    snprintf(b, sizeof(b), "hard_%d", i);
+    coucal_write(h, b, (intptr_t) (i + 1));
+  }
+  CHECK(g_printed == 0);
+
+  CHECK(coucal_read(h, "hard_0", NULL) != 0);
+  CHECK(coucal_readptr(h, "hard_0", NULL) != 0);
+  CHECK(coucal_readptr(h, "absent", NULL) == 0);
+  coucal_write(h, "zero", 0);
+  CHECK(coucal_readptr(h, "zero", NULL) == 0);
+
+  /* the empty key is the one shared, read-only entry of the string pool */
+  CHECK(coucal_write(h, "", 7) != 0);
+  CHECK(coucal_get_intptr(h, "") == 7);
+  CHECK(coucal_remove(h, "") != 0);
+  g_logged[0] = '\0';
+  coucal_delete(&h);
+
+  /* the compiled-out call sites are on the cuckoo path only */
+  moved = strstr(g_logged, " moved=");
+  CHECK(moved != NULL);
+  CHECK(sscanf(moved, " moved=%lu", &cuckoo_moved) == 1);
+  CHECK(cuckoo_moved != 0);
+
+  /* an empty table must not report a 0/0 average */
+  h = coucal_new(0);
+  coucal_set_assert_handler(h, test_log_handler, NULL, NULL);
+  g_logged[0] = '\0';
+  coucal_delete(&h);
+  CHECK(strstr(g_logged, "avg-moved=0 ") != NULL);
+  CHECK(strstr(g_logged, "nan") == NULL);
+  return EXIT_SUCCESS;
+}
+
+/* hash values are contractual: pin them, not just "the table still works" */
+static const size_t kat_lengths[] = {0, 1, 4, 15, 16, 17, 31, 32, 33, 64};
+
+#if (defined(HTS_INTHASH_USES_MD5) || defined(HTS_INTHASH_USES_OPENSSL_MD5))
+/* bundled and OpenSSL both hash with MD5, hence the shared vectors */
+#if (COUCAL_HASH_SIZE == 32)
+#define KAT_VECTORS
+static const uint64_t kat_vectors[][2] = {
+    {0x41859d3dUL, 0x7af0f863UL}, {0x5730c9b4UL, 0x669bdf66UL},
+    {0x9bce5ae8UL, 0xd6f80007UL}, {0xdb0207ecUL, 0x6596ab43UL},
+    {0xf574fd85UL, 0x4adc0cbfUL}, {0xddf3d440UL, 0x75a80183UL},
+    {0xeb956e99UL, 0xc022457eUL}, {0xf4c6b6c9UL, 0xcf63c053UL},
+    {0xd6f7e72bUL, 0xddbe6383UL}, {0xf0dd1d57UL, 0x546bee2aUL}};
+#else
+#define KAT_VECTORS
+static const uint64_t kat_vectors[][2] = {
+    {0x04b2008fd98c1dd4ULL, 0x7e42f8ec980980e9ULL},
+    {0x03370177d9ffc813ULL, 0x65acde118ecf01a7ULL},
+    {0xc6f3ff633fecaf8fULL, 0x100bff64a422f567ULL},
+    {0xd233b6dc93008ed5ULL, 0xb7a51d9f48028939ULL},
+    {0x145bc87100617b88ULL, 0x5e87c4cef515860dULL},
+    {0x8e63ce253b5f76e7ULL, 0xfbcbcfa6e6aca2a7ULL},
+    {0xdfeea7ab59c25736ULL, 0x1fcce2d5b25739afULL},
+    {0x7b2c5710ba0c2c8eULL, 0xb44f97434eca9a47ULL},
+    {0xf05d199084455939ULL, 0x2de37a1352b2be12ULL},
+    {0x48a67a0cb723e171ULL, 0x1ccd942647fefc26ULL}};
+#endif
+#elif (defined(HTS_INTHASH_USES_MURMUR))
+#if (COUCAL_HASH_SIZE == 32)
+#define KAT_VECTORS
+static const uint64_t kat_vectors[][2] = {
+    {0x3aa5200cUL, 0x00000000UL}, {0xfd3673c3UL, 0x00000000UL},
+    {0x8ae9d282UL, 0x00000000UL}, {0x4389f567UL, 0x0601ed3cUL},
+    {0x779e50e4UL, 0xdd672d9cUL}, {0xde07a68fUL, 0xa24806bdUL},
+    {0x7de97cf6UL, 0xb3b5376fUL}, {0x64ecc591UL, 0x5af5e487UL},
+    {0x7f4b072fUL, 0xb4033332UL}, {0x0afda147UL, 0x0c0bb6d5UL}};
+#else
+#define KAT_VECTORS
+static const uint64_t kat_vectors[][2] = {
+    {0x95c80cbaaf6d2cb6ULL, 0x95c80cba95c80cbaULL},
+    {0xc823081235157bd1ULL, 0xc8230812c8230812ULL},
+    {0x3ad28e70b03b5cf2ULL, 0x3ad28e703ad28e70ULL},
+    {0x882f036680412724ULL, 0x8e2eee5ac3c8d243ULL},
+    {0x62b4501328e77eb7ULL, 0xbfd37d8f5f792e53ULL},
+    {0xa725b5bd4aa2dc25ULL, 0x056db30094a57aaaULL},
+    {0x872eed54a35d8b40ULL, 0x349bda3bdeb4f7b6ULL},
+    {0x029c3adcdb543fa5ULL, 0x5869de5bbfb8fa34ULL},
+    {0x755be581d8a4511cULL, 0xc158d6b3a7ef5633ULL},
+    {0xb2f9883d0c611652ULL, 0xbef23ee8069cb715ULL}};
+#endif
+#elif (defined(HTS_INTHASH_USES_FNV1))
+/* FNV-1 folds bytes, so unlike the others its vectors hold on any byte order */
+#define KAT_BYTE_ORDER_AGNOSTIC
+#if (COUCAL_HASH_SIZE == 32)
+#define KAT_VECTORS
+static const uint64_t kat_vectors[][2] = {
+    {0x4fd0bfc1UL, 0xb02f403eUL}, {0x29620a98UL, 0x29620729UL},
+    {0x8a72ee46UL, 0x6c07f166UL}, {0xd8bfa3aeUL, 0xce1e727fUL},
+    {0x8a24f51aUL, 0xabb066bbUL}, {0xdfa36ca7UL, 0x01f83463UL},
+    {0x10e2ba78UL, 0x01342177UL}, {0x95651530UL, 0x83658d24UL},
+    {0x0550b2dbUL, 0xde3c677bUL}, {0x8df158b0UL, 0xc61343bdUL}};
+#else
+#define KAT_VECTORS
+static const uint64_t kat_vectors[][2] = {
+    {0xcbf29ce484222325ULL, 0x340d631b7bdddcdaULL},
+    {0xaf63bd4c8601b7d4ULL, 0x509c41b379fe469aULL},
+    {0xed39da7f674b3439ULL, 0x8efaf978e2fd081eULL},
+    {0x6538d35fbd8770f1ULL, 0xacad5e6e62b32c11ULL},
+    {0x87001caf0d24e9b5ULL, 0x1dc38691b673e02aULL},
+    {0x8a1a727355b91ed4ULL, 0x071dd39906e5e7faULL},
+    {0x9900f4c989e24eb1ULL, 0xb02be8c6b11fc9b1ULL},
+    {0xdeeea3754b8bb645ULL, 0x7a663a9ef903b7baULL},
+    {0x5b36054f5e66b794ULL, 0xff6d56212151315aULL},
+    {0x7e6a46d5f39b1e65ULL, 0x0e026227c811219aULL}};
+#endif
+#endif
+
+static int kat_vectors_apply(void) {
+#ifdef KAT_VECTORS
+#ifdef KAT_BYTE_ORDER_AGNOSTIC
+  return 1;
+#else
+  const uint32_t one = 1;
+  return *(const unsigned char *) &one == 1;
+#endif
+#else
+  return 0;
+#endif
+}
+
+static int coucal_test_hash_vectors(void) {
+  const int verified = kat_vectors_apply();
+  unsigned char buf[64];
+  size_t i;
+
+  if (!verified) {
+    fprintf(stderr, "WARNING: no known-answer vectors for this backend, hash "
+                    "size or byte order: coucal_hash_data() is UNVERIFIED\n");
+  }
+  for (i = 0; i < sizeof(buf); i++) {
+    buf[i] = (unsigned char) (i * 37 + 11);
+  }
+  for (i = 0; i < sizeof(kat_lengths) / sizeof(kat_lengths[0]); i++) {
+    const coucal_hashkeys hashes = coucal_hash_data(buf, kat_lengths[i]);
+#ifdef KAT_VECTORS
+    if (verified) {
+      CHECK((uint64_t) hashes.hash1 == kat_vectors[i][0]);
+      CHECK((uint64_t) hashes.hash2 == kat_vectors[i][1]);
+      continue;
+    }
+#endif
+    /* the weakest claim still worth making without vectors */
+    CHECK(coucal_hash_data(buf, kat_lengths[i]).hash1 == hashes.hash1);
+    CHECK(hashes.hash1 != hashes.hash2);
+  }
   return EXIT_SUCCESS;
 }
 
@@ -735,7 +1123,22 @@ int main(int argc, char **argv) {
   if (coucal_test_api() != EXIT_SUCCESS) {
     return EXIT_FAILURE;
   }
+  if (coucal_test_pool_alias() != EXIT_SUCCESS) {
+    return EXIT_FAILURE;
+  }
+  if (coucal_test_new_size() != EXIT_SUCCESS) {
+    return EXIT_FAILURE;
+  }
   if (coucal_test_value_handler() != EXIT_SUCCESS) {
+    return EXIT_FAILURE;
+  }
+  if (coucal_test_key_handler() != EXIT_SUCCESS) {
+    return EXIT_FAILURE;
+  }
+  if (coucal_test_hardening() != EXIT_SUCCESS) {
+    return EXIT_FAILURE;
+  }
+  if (coucal_test_hash_vectors() != EXIT_SUCCESS) {
     return EXIT_FAILURE;
   }
   if (coucal_test_oracle() != EXIT_SUCCESS) {

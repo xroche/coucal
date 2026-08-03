@@ -28,12 +28,11 @@ static uint32_t rotl32 ( uint32_t x, int8_t r )
   return (x << r) | (x >> (32 - r));
 }
 #define ROTL32(x,y)     rotl32(x,y)
-static uint32_t getblock32 ( const uint8_t * p, int i )
-{
+static uint32_t getblock32(const uint8_t *p, ptrdiff_t i) {
   /* memcpy the 32-bit block: defined on any alignment, and lowered to the same
      single load as p[i] on hosts that tolerate unaligned access. */
   uint32_t v;
-  memcpy(&v, p + (ptrdiff_t) i * 4, sizeof(v));
+  memcpy(&v, p + i * 4, sizeof(v));
   return v;
 }
 static uint32_t fmix32 ( uint32_t h )
@@ -47,10 +46,11 @@ static uint32_t fmix32 ( uint32_t h )
   return h;
 }
 #define BIG_CONSTANT(x) (x##LLU)
-static void MurmurHash3_x86_128 ( const void * key, const int len,
-                                  uint32_t seed, void * out ) {
+/* an int len turns negative past 2GB, and the block loop then reads OOB */
+static void MurmurHash3_x86_128(const void *key, const size_t len,
+                                uint32_t seed, void *out) {
   const uint8_t * data = (const uint8_t*)key;
-  const int nblocks = len / 16;
+  const ptrdiff_t nblocks = (ptrdiff_t) (len / 16);
 
   uint32_t h1 = seed;
   uint32_t h2 = seed;
@@ -63,8 +63,8 @@ static void MurmurHash3_x86_128 ( const void * key, const int len,
   const uint32_t c4 = 0xa1e38b93;
 
   const uint8_t * blocks = data + nblocks*16;
-  int i;
-  
+  ptrdiff_t i;
+
   for(i = -nblocks; i; i++)
   {
     uint32_t k1 = getblock32(blocks,i*4+0);
@@ -132,8 +132,10 @@ static void MurmurHash3_x86_128 ( const void * key, const int len,
 #pragma GCC diagnostic pop
 #endif
 
-
-  h1 ^= len; h2 ^= len; h3 ^= len; h4 ^= len;
+  h1 ^= (uint32_t) len;
+  h2 ^= (uint32_t) len;
+  h3 ^= (uint32_t) len;
+  h4 ^= (uint32_t) len;
 
   h1 += h2; h1 += h3; h1 += h4;
   h2 += h1; h3 += h1; h4 += h1;

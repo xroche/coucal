@@ -167,7 +167,7 @@ typedef struct coucal_hashkeys {
 
 /** Item holding a value. **/
 struct coucal_item {
-  /** Key. **/
+  /** Key, owned by the hashtable ; valid only until the next mutating call. **/
   coucal_key name;
 
   /** Value. **/
@@ -296,11 +296,11 @@ COUCAL_EXTERN void coucal_value_is_malloc(coucal hashtable, int flag);
 
 /**
  * Set handlers for values.
- * free: this handler is called exactly once for every value that leaves the
- * hashtable: when its entry is removed (coucal_remove), when a new write for
- * the same key replaces it (the old value is freed), and for every remaining
- * entry when the hashtable is destroyed (coucal_delete). if NULL, values
- * won't be free'd.
+ * free: this handler is called exactly once for every value whose ptr member is
+ * not NULL and that leaves the hashtable: when its entry is removed
+ * (coucal_remove), when a new write for the same key replaces it (the old value
+ * is freed), and for every remaining entry when the hashtable is destroyed
+ * (coucal_delete). if NULL, values won't be free'd.
  * arg: opaque custom argument to be used by functions.
  * Handler(s) MUST NOT be changed once elements have been added.
  **/
@@ -311,7 +311,7 @@ COUCAL_EXTERN void coucal_value_set_value_handler(coucal hashtable,
 /**
  * Set handlers for keys.
  * dup: handler called to duplicate a key. if NULL, the internal pool is used.
- * free: handler called to free a key. if NULL, the internal pool is used.
+ * free: fires once per 'dup' key on removal/delete, not replace. if NULL, pool.
  * hash: hashing handler, called to hash a key. if NULL, the default hash
  * function is used.
  * equals: comparison handler, returning non-zero value when two keys are
@@ -356,19 +356,21 @@ COUCAL_EXTERN void coucal_set_name(coucal hashtable, coucal_key_const name);
 
 /**
  * Get the hashtable name, for degugging purpose.
- * Return NULL if no name was defined.
+ * Return NULL if no name was defined, or if 'hashtable' is NULL.
  **/
 COUCAL_EXTERN const char* coucal_get_name(coucal hashtable);
 
 /**
  * Read an integer entry from the hashtable.
  * Return non-zero value upon success and sets intvalue.
+ * intvalue may be NULL, to only probe the entry presence.
  **/
 COUCAL_EXTERN int coucal_read(coucal hashtable, coucal_key_const name,
                               intptr_t * intvalue);
 
 /**
  * Same as coucal_read(), but return 0 is the value was zero.
+ * intvalue may be NULL, to only probe for a present and non-zero entry.
  **/
 COUCAL_EXTERN int coucal_readptr(coucal hashtable, coucal_key_const name,
                                  intptr_t * intvalue);
@@ -494,6 +496,8 @@ COUCAL_EXTERN struct_coucal_enum coucal_enum_new(coucal hashtable);
 
 /**
  * Enumerate the next entry.
+ * The returned item and its name are valid only until the next mutating call,
+ * though the name may still be passed back to this library as a key.
  **/
 COUCAL_EXTERN coucal_item *coucal_enum_next(struct_coucal_enum * e);
 
