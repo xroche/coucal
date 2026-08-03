@@ -208,8 +208,7 @@ jobs:
           cc $flags -DCOUCAL_HASH_SIZE=64 -c coucal.c -o /dev/null
 
   # Consumers compile coucal.c with their own flags, so a warning our Makefile
-  # exempts is one only they see (#29, #32). Build it here without the Makefile,
-  # at every verbosity, under the warning set HTTrack uses.
+  # exempts is one only they see (#29, #32); build it here without the Makefile.
   consumer-flags:
     name: consumer flags (no Makefile)
     runs-on: ubuntu-24.04
@@ -222,6 +221,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends build-essential clang
 
+      # clang at TRACE is load-bearing: it is the only combination that flags an
+      # unused coucal_nolog (gcc never warns on an unused static inline).
       - name: Compile at every log level
         run: |
           set -euo pipefail
