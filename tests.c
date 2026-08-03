@@ -366,6 +366,117 @@ static int coucal_test_api(void) {
   return EXIT_SUCCESS;
 }
 
+/* pool offsets below don't depend on hash backend or key width */
+#define ALIAS_DONOR_LEN 600
+#define ALIAS_FILLER_LEN 99
+
+/* look up the pooled key by content: enumeration order is hash-dependent */
+static const char *coucal_stored_key(coucal hashtable, const char *name) {
+  struct_coucal_enum e = coucal_enum_new(hashtable);
+  const coucal_item *item;
+
+  while ((item = coucal_enum_next(&e)) != NULL) {
+    if (strcmp((const char *) item->name, name) == 0) {
+      return (const char *) item->name;
+    }
+  }
+  return NULL;
+}
+
+/* builds a pool with holes so the next growth compacts rather than reallocs */
+static coucal coucal_build_holed_pool(const char *donor) {
+  coucal h = coucal_new(0);
+  char filler[ALIAS_FILLER_LEN + 1];
+  int i;
+
+  memset(filler, 'f', sizeof(filler) - 1);
+  filler[sizeof(filler) - 1] = '\0';
+
+  filler[0] = '0';
+  coucal_write(h, filler, 0);
+  coucal_write(h, donor, 1);
+  for (i = 1; i < 4; i++) {
+    filler[0] = (char) ('0' + i);
+    coucal_write(h, filler, i);
+  }
+  for (i = 0; i < 4; i++) {
+    filler[0] = (char) ('0' + i);
+    coucal_remove(h, filler);
+  }
+  return h;
+}
+
+/* forces pool growth via `aliased`; the gap to `donor` shows which path ran */
+static int coucal_check_aliased_write(coucal h, const char *donor,
+                                      const char *aliased) {
+  char expected[ALIAS_DONOR_LEN + 1];
+  const size_t donor_len = strlen(donor) + 1;
+  const char *stored_donor;
+  const char *stored_aliased;
+  size_t before;
+
+  CHECK(strlen(aliased) < sizeof(expected));
+  memcpy(expected, aliased, strlen(aliased) + 1);
+
+  before = coucal_memory_size(h);
+  CHECK(coucal_write(h, aliased, 42) != 0); /* added, so the dup path ran */
+  CHECK(coucal_memory_size(h) > before);    /* and it did grow the pool */
+
+  CHECK(coucal_exists(h, donor));
+  CHECK(coucal_exists(h, expected));
+  stored_donor = coucal_stored_key(h, donor);
+  stored_aliased = coucal_stored_key(h, expected);
+  CHECK(stored_donor != NULL && stored_aliased != NULL);
+  CHECK((size_t) (stored_aliased - stored_donor) == donor_len);
+  return EXIT_SUCCESS;
+}
+
+/* a pool-aliased key must survive the growth its own insertion triggers */
+static int coucal_test_pool_alias(void) {
+  char donor[ALIAS_DONOR_LEN + 1];
+  const char *stored;
+  coucal h;
+
+  memset(donor, 'd', ALIAS_DONOR_LEN);
+  donor[ALIAS_DONOR_LEN] = '\0';
+
+  /* realloc() growth: the pool has no holes, so compaction cannot be chosen */
+  h = coucal_new(0);
+  CHECK(coucal_write(h, donor, 1) != 0);
+  stored = coucal_stored_key(h, donor);
+  CHECK(stored != NULL);
+  CHECK(coucal_check_aliased_write(h, donor, stored + 1) == EXIT_SUCCESS);
+  coucal_delete(&h);
+
+  /* compaction growth, aliasing a live key: the old pool is freed outright */
+  h = coucal_build_holed_pool(donor);
+  stored = coucal_stored_key(h, donor);
+  CHECK(stored != NULL);
+  CHECK(coucal_check_aliased_write(h, donor, stored + 1) == EXIT_SUCCESS);
+  coucal_delete(&h);
+
+  /* compaction growth, aliasing a dead filler's tail: nothing tracks it */
+  h = coucal_build_holed_pool(donor);
+  stored = coucal_stored_key(h, donor);
+  CHECK(stored != NULL);
+  CHECK(coucal_check_aliased_write(h, donor, stored + ALIAS_DONOR_LEN + 4) ==
+        EXIT_SUCCESS);
+  coucal_delete(&h);
+
+  return EXIT_SUCCESS;
+}
+
+/* An out-of-range initial size is rejected, not shifted by the size_t width. */
+static int coucal_test_new_size(void) {
+  coucal h;
+
+  CHECK(coucal_new((size_t) -1) == NULL);
+  h = coucal_new(1024);
+  CHECK(coucal_write(h, "key", 1) != 0);
+  coucal_delete(&h);
+  return EXIT_SUCCESS;
+}
+
 /* The value free-handler must fire exactly once per value that leaves the
    table -- on replace (old value), on remove, and on delete (survivors) --
    and never otherwise. A miscount, or a run flagged by the leak sanitizer,
@@ -691,6 +802,12 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   }
   if (coucal_test_api() != EXIT_SUCCESS) {
+    return EXIT_FAILURE;
+  }
+  if (coucal_test_pool_alias() != EXIT_SUCCESS) {
+    return EXIT_FAILURE;
+  }
+  if (coucal_test_new_size() != EXIT_SUCCESS) {
     return EXIT_FAILURE;
   }
   if (coucal_test_value_handler() != EXIT_SUCCESS) {
