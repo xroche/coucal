@@ -92,13 +92,28 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential gcc-multilib
+          # lib32ubsan1 is only a Recommends of gcc-multilib, and
+          # --no-install-recommends drops it: the UBSan step below links against it.
+          sudo apt-get install -y --no-install-recommends build-essential gcc-multilib lib32ubsan1
 
       # Exercises the 32-bit pointer / size_t ABI, where the string-pool offset
       # math (the uintptr_t pointer recompute) can truncate or wrap in ways the
       # 64-bit build never reveals.
       - name: Build and test (-m32)
         run: make all check CC="gcc -m32"
+
+      # size_t is 32 bits here, so a shift by its width is reachable from the
+      # DEFAULT key width -- the configuration HTTrack ships, and one the amd64
+      # legs only reach with HASH_SIZE=64. Unsanitized, this leg cannot see it.
+      - name: Build and test (-m32, UBSan)
+        env:
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: |
+          set -euo pipefail
+          make clean
+          make check CC="gcc -m32" \
+            CFLAGS="-O1 -g -fsanitize=undefined -fno-sanitize-recover=all" \
+            LDFLAGS="-fsanitize=undefined"
 
   macos:
     name: build+test (macOS arm64, clang)

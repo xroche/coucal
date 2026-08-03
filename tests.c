@@ -364,31 +364,113 @@ static int coucal_test_api(void) {
   return EXIT_SUCCESS;
 }
 
-/* A key pointing inside the string pool must survive the pool growth its own
-   insertion triggers. A suffix of an enumerated name is such a key, and new. */
-static int coucal_test_pool_alias(void) {
+/* The string pool is independent of the hash backend and key width, so every
+   pool offset computed below is the same in all configurations. */
+#define ALIAS_DONOR_LEN 600
+#define ALIAS_FILLER_LEN 99
+
+/* The pooled key pointer for `name`; enumeration order is hash-dependent, so
+   match on content rather than taking whichever item comes first. */
+static const char *coucal_stored_key(coucal hashtable, const char *name) {
+  struct_coucal_enum e = coucal_enum_new(hashtable);
+  const coucal_item *item;
+
+  while ((item = coucal_enum_next(&e)) != NULL) {
+    if (strcmp((const char *) item->name, name) == 0) {
+      return (const char *) item->name;
+    }
+  }
+  return NULL;
+}
+
+/* A pool of capacity 1024 holding the 601-byte donor at offset 100, four dead
+   100-byte fillers around it, and 23 bytes to spare: inserting anything larger
+   must grow, and used/size (601/1001) is below 3/4, so growth compacts. */
+static coucal coucal_build_holed_pool(const char *donor) {
   coucal h = coucal_new(0);
+  char filler[ALIAS_FILLER_LEN + 1];
   int i;
 
-  for (i = 0; i < 400; i++) {
-    char key[80];
-    char expected[80];
-    struct_coucal_enum e;
-    const coucal_item *item;
-    const char *pooled;
+  memset(filler, 'f', sizeof(filler) - 1);
+  filler[sizeof(filler) - 1] = '\0';
 
-    snprintf(key, sizeof(key), "%04d-tail-tail-tail-tail-tail-tail-tail", i);
-    coucal_write(h, key, i);
-
-    e = coucal_enum_new(h);
-    item = coucal_enum_next(&e);
-    CHECK(item != NULL);
-    pooled = (const char *) item->name + 1 + (i % 3);
-    snprintf(expected, sizeof(expected), "%s", pooled);
-    coucal_write(h, pooled, 1);
-    CHECK(coucal_exists(h, expected));
+  filler[0] = '0';
+  coucal_write(h, filler, 0);
+  coucal_write(h, donor, 1);
+  for (i = 1; i < 4; i++) {
+    filler[0] = (char) ('0' + i);
+    coucal_write(h, filler, i);
   }
+  for (i = 0; i < 4; i++) {
+    filler[0] = (char) ('0' + i);
+    coucal_remove(h, filler);
+  }
+  return h;
+}
+
+/* Insert `aliased`, a pool-aliased key long enough that its own insertion
+   overflows the pool. The gap check pins down which growth path ran: a new key
+   lands at pool.size, so ending up exactly one donor behind the donor means the
+   dead bytes in between were reclaimed, which only compaction does. */
+static int coucal_check_aliased_write(coucal h, const char *donor,
+                                      const char *aliased) {
+  char expected[ALIAS_DONOR_LEN + 1];
+  const size_t donor_len = strlen(donor) + 1;
+  const char *stored_donor;
+  const char *stored_aliased;
+  size_t before;
+
+  CHECK(strlen(aliased) < sizeof(expected));
+  memcpy(expected, aliased, strlen(aliased) + 1);
+
+  before = coucal_memory_size(h);
+  CHECK(coucal_write(h, aliased, 42) != 0); /* added, so the dup path ran */
+  CHECK(coucal_memory_size(h) > before);    /* and it did grow the pool */
+
+  CHECK(coucal_exists(h, donor));
+  CHECK(coucal_exists(h, expected));
+  stored_donor = coucal_stored_key(h, donor);
+  stored_aliased = coucal_stored_key(h, expected);
+  CHECK(stored_donor != NULL && stored_aliased != NULL);
+  CHECK((size_t) (stored_aliased - stored_donor) == donor_len);
+  return EXIT_SUCCESS;
+}
+
+/* A key pointing into the string pool must survive the pool growth that its own
+   insertion triggers, whichever way the pool grows. */
+static int coucal_test_pool_alias(void) {
+  char donor[ALIAS_DONOR_LEN + 1];
+  const char *stored;
+  coucal h;
+
+  memset(donor, 'd', ALIAS_DONOR_LEN);
+  donor[ALIAS_DONOR_LEN] = '\0';
+
+  /* realloc() growth: the pool has no holes, so compaction cannot be chosen */
+  h = coucal_new(0);
+  CHECK(coucal_write(h, donor, 1) != 0);
+  stored = coucal_stored_key(h, donor);
+  CHECK(stored != NULL);
+  CHECK(coucal_check_aliased_write(h, donor, stored + 1) == EXIT_SUCCESS);
   coucal_delete(&h);
+
+  /* compaction growth, aliasing a live key: the old pool is freed outright */
+  h = coucal_build_holed_pool(donor);
+  stored = coucal_stored_key(h, donor);
+  CHECK(stored != NULL);
+  CHECK(coucal_check_aliased_write(h, donor, stored + 1) == EXIT_SUCCESS);
+  coucal_delete(&h);
+
+  /* compaction growth, aliasing the tail of the dead filler behind the donor
+     (its first byte was zeroed on release): no item tracks that string, so
+     nothing relocates it, and an offset recompute cannot find it either */
+  h = coucal_build_holed_pool(donor);
+  stored = coucal_stored_key(h, donor);
+  CHECK(stored != NULL);
+  CHECK(coucal_check_aliased_write(h, donor, stored + ALIAS_DONOR_LEN + 4) ==
+        EXIT_SUCCESS);
+  coucal_delete(&h);
+
   return EXIT_SUCCESS;
 }
 
@@ -398,7 +480,7 @@ static int coucal_test_new_size(void) {
 
   CHECK(coucal_new((size_t) -1) == NULL);
   h = coucal_new(1024);
-  CHECK(coucal_created(h));
+  CHECK(coucal_write(h, "key", 1) != 0);
   coucal_delete(&h);
   return EXIT_SUCCESS;
 }

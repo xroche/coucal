@@ -686,8 +686,7 @@ static void coucal_realloc_pool(coucal hashtable, size_t capacity) {
                 (uint64_t) count, (uint64_t) hashtable->pool.capacity);
 }
 
-/* is this key stored inside the string pool ? (integer compare: the pointers
-   are unrelated objects when it is not) */
+/* is this key stored inside the string pool ? */
 static INTHASH_INLINE int coucal_is_pooled(const coucal hashtable,
                                            const char *name) {
   const uintptr_t base = (uintptr_t) hashtable->pool.buffer;
