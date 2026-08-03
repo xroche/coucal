@@ -364,6 +364,45 @@ static int coucal_test_api(void) {
   return EXIT_SUCCESS;
 }
 
+/* A key pointing inside the string pool must survive the pool growth its own
+   insertion triggers. A suffix of an enumerated name is such a key, and new. */
+static int coucal_test_pool_alias(void) {
+  coucal h = coucal_new(0);
+  int i;
+
+  for (i = 0; i < 400; i++) {
+    char key[80];
+    char expected[80];
+    struct_coucal_enum e;
+    const coucal_item *item;
+    const char *pooled;
+
+    snprintf(key, sizeof(key), "%04d-tail-tail-tail-tail-tail-tail-tail", i);
+    coucal_write(h, key, i);
+
+    e = coucal_enum_new(h);
+    item = coucal_enum_next(&e);
+    CHECK(item != NULL);
+    pooled = (const char *) item->name + 1 + (i % 3);
+    snprintf(expected, sizeof(expected), "%s", pooled);
+    coucal_write(h, pooled, 1);
+    CHECK(coucal_exists(h, expected));
+  }
+  coucal_delete(&h);
+  return EXIT_SUCCESS;
+}
+
+/* An out-of-range initial size is rejected, not shifted by the size_t width. */
+static int coucal_test_new_size(void) {
+  coucal h;
+
+  CHECK(coucal_new((size_t) -1) == NULL);
+  h = coucal_new(1024);
+  CHECK(coucal_created(h));
+  coucal_delete(&h);
+  return EXIT_SUCCESS;
+}
+
 /* The value free-handler must fire exactly once per value that leaves the
    table -- on replace (old value), on remove, and on delete (survivors) --
    and never otherwise. A miscount, or a run flagged by the leak sanitizer,
@@ -504,6 +543,12 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   }
   if (coucal_test_api() != EXIT_SUCCESS) {
+    return EXIT_FAILURE;
+  }
+  if (coucal_test_pool_alias() != EXIT_SUCCESS) {
+    return EXIT_FAILURE;
+  }
+  if (coucal_test_new_size() != EXIT_SUCCESS) {
     return EXIT_FAILURE;
   }
   if (coucal_test_value_handler() != EXIT_SUCCESS) {

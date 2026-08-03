@@ -686,10 +686,21 @@ static void coucal_realloc_pool(coucal hashtable, size_t capacity) {
                 (uint64_t) count, (uint64_t) hashtable->pool.capacity);
 }
 
+/* is this key stored inside the string pool ? (integer compare: the pointers
+   are unrelated objects when it is not) */
+static INTHASH_INLINE int coucal_is_pooled(const coucal hashtable,
+                                           const char *name) {
+  const uintptr_t base = (uintptr_t) hashtable->pool.buffer;
+  const uintptr_t addr = (uintptr_t) name;
+  return hashtable->pool.buffer != NULL && addr >= base &&
+         addr - base < hashtable->pool.capacity;
+}
+
 static coucal_key coucal_dup_name_internal(coucal hashtable,
                                            coucal_key_const name_) {
-  const char *const name = (const char*) name_;
+  const char *name = (const char *) name_;
   const size_t len = strlen(name) + 1;
+  char *staged = NULL;
   char *s;
 
   /* the pool does not allow empty strings for safety purpose ; handhe that
@@ -703,6 +714,22 @@ static coucal_key coucal_dup_name_internal(coucal hashtable,
   coucal_assert(hashtable, hashtable->pool.size <= hashtable->pool.capacity);
   if (hashtable->pool.capacity - hashtable->pool.size < len) {
     size_t capacity;
+
+    /* growing the pool releases the block a pooled key points into (compaction
+       may also relocate it, or the string it is a suffix of): copy it aside */
+    if (coucal_is_pooled(hashtable, name)) {
+      staged = (char *) malloc(len);
+      if (staged == NULL) {
+        coucal_crit(hashtable,
+                    "** hashtable key staging error: could not allocate "
+                    "%" UINT_64_FORMAT " bytes",
+                    (uint64_t) len);
+        coucal_assert(hashtable, !"hashtable key staging error");
+      }
+      memcpy(staged, name, len);
+      name = staged;
+    }
+
     for(capacity = MIN_POOL_CAPACITY ; capacity < hashtable->pool.size + len
       ; capacity <<= 1) ;
     coucal_assert(hashtable, hashtable->pool.size < capacity);
@@ -715,6 +742,10 @@ static coucal_key coucal_dup_name_internal(coucal hashtable,
   memcpy(s, name, len);
   hashtable->pool.size += len;
   hashtable->pool.used += len;
+
+  if (staged != NULL) {
+    free(staged);
+  }
 
   return s;
 }
@@ -1387,21 +1418,26 @@ intptr_t coucal_get_intptr(coucal hashtable, coucal_key_const name) {
 
 static INTHASH_INLINE size_t coucal_get_pow2(size_t initial_size) {
   size_t size;
-  for(size = MIN_LG_SIZE 
-    ; size <= COUCAL_HASH_SIZE && POW2(size) < initial_size
-    ; size++) ;
+  /* short-circuit: POW2() must never shift by the width of size_t */
+  for (size = MIN_LG_SIZE;
+       coucal_is_acceptable_pow2(size) && POW2(size) < initial_size; size++)
+    ;
   return size;
 }
 
 coucal coucal_new(size_t initial_size) {
   const size_t lg_size = coucal_get_pow2(initial_size);
-  const int lg_valid = coucal_is_acceptable_pow2(lg_size);
-  coucal hashtable = lg_valid 
-    ? (coucal) calloc(1, sizeof(struct_coucal)) : NULL;
-  coucal_item *const items = 
-    (coucal_item *) calloc(POW2(lg_size), sizeof(coucal_item));
+  coucal hashtable;
+  coucal_item *items;
 
-  if (lg_valid && items != NULL && hashtable != NULL) {
+  if (!coucal_is_acceptable_pow2(lg_size)) {
+    return NULL;
+  }
+
+  hashtable = (coucal) calloc(1, sizeof(struct_coucal));
+  items = (coucal_item *) calloc(POW2(lg_size), sizeof(coucal_item));
+
+  if (items != NULL && hashtable != NULL) {
     hashtable->lg_size = lg_size;
     hashtable->items = items;
     hashtable->used = 0;

@@ -75,9 +75,12 @@ jobs:
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
         run: |
           set -euo pipefail
-          make check \
-            CFLAGS="-O1 -g -fsanitize=address -fsanitize=undefined -fno-sanitize-recover=all -fno-omit-frame-pointer" \
-            LDFLAGS="-fsanitize=address -fsanitize=undefined"
+          cflags="-O1 -g -fsanitize=address -fsanitize=undefined -fno-sanitize-recover=all -fno-omit-frame-pointer"
+          ldflags="-fsanitize=address -fsanitize=undefined"
+          make check CFLAGS="$cflags" LDFLAGS="$ldflags"
+          # the 64-bit key width is where a shift by the size_t width surfaces
+          make clean
+          make check HASH_SIZE=64 CFLAGS="$cflags" LDFLAGS="$ldflags"
 
   abi32:
     name: build+test (linux i386, gcc -m32)
