@@ -255,32 +255,35 @@ struct struct_coucal {
 /* Compiler-specific. */
 #ifdef __GNUC__
 #define INTHASH_PRINTF_FUN(fmt, arg) __attribute__ ((format (printf, fmt, arg)))
+#define INTHASH_UNUSED_FUN __attribute__((unused))
 #define INTHASH_INLINE __inline__
 #elif (defined(_MSC_VER))
 #define INTHASH_PRINTF_FUN(FMT, ARGS)
+#define INTHASH_UNUSED_FUN
 #define INTHASH_INLINE __inline
 #else
 #define INTHASH_PRINTF_FUN(FMT, ARGS)
+#define INTHASH_UNUSED_FUN
 #define INTHASH_INLINE
 #endif
 
 /* Logging level. */
 static void coucal_log(const coucal hashtable, coucal_loglevel level,
                         const char *format, va_list args);
-#define DECLARE_LOG_FUNCTION(NAME, LEVEL) \
-static void NAME(const coucal hashtable, const char *format, ...) \
-  INTHASH_PRINTF_FUN(2, 3); \
-static void NAME(const coucal hashtable, const char *format, ...) { \
-  va_list args; \
-  va_start(args, format); \
-  coucal_log(hashtable, LEVEL, format, args); \
-  va_end(args); \
-}
+#define DECLARE_LOG_FUNCTION(NAME, LEVEL)                                      \
+  static void NAME(const coucal hashtable, const char *format, ...)            \
+      INTHASH_PRINTF_FUN(2, 3) INTHASH_UNUSED_FUN;                             \
+  static void NAME(const coucal hashtable, const char *format, ...) {          \
+    va_list args;                                                              \
+    va_start(args, format);                                                    \
+    coucal_log(hashtable, LEVEL, format, args);                                \
+    va_end(args);                                                              \
+  }
 /* a compiled-out level must not evaluate its args ; -Wformat still applies */
 #define COUCAL_NEVER while (0)
 #define COUCAL_NO_LOG COUCAL_NEVER coucal_nolog
 
-/* all levels always compile (-Wno-unused-function drops unused): none rots */
+/* all levels always compile, tagged unused so consumers need no extra flag */
 DECLARE_LOG_FUNCTION(coucal_do_crit, coucal_log_critical)
 DECLARE_LOG_FUNCTION(coucal_do_warning, coucal_log_warning)
 DECLARE_LOG_FUNCTION(coucal_do_info, coucal_log_info)
@@ -364,9 +367,9 @@ static void coucal_log(const coucal hashtable, coucal_loglevel level,
 }
 
 /* No logging (should be dropped by the compiler) */
-static INTHASH_INLINE void coucal_nolog(const coucal hashtable, 
+static INTHASH_INLINE void coucal_nolog(const coucal hashtable,
                                         const char *format, ...)
-                                        INTHASH_PRINTF_FUN(2, 3);
+    INTHASH_PRINTF_FUN(2, 3) INTHASH_UNUSED_FUN;
 static INTHASH_INLINE void coucal_nolog(const coucal hashtable, 
                                         const char *format, ...) {
   (void) hashtable;

@@ -39,7 +39,7 @@ override CPPFLAGS += -D_REENTRANT -D_GNU_SOURCE \
                     -DCOUCAL_LOG_LEVEL=COUCAL_LOG_$(LOG_LEVEL)
 # -Wcast-qual is implied by neither -Wall nor -Wextra, and HTTrack builds with it.
 override CFLAGS   += -fPIC -pthread \
-                    -W -Wall -Wextra -Werror -Wno-unused-function -Wcast-qual
+                    -W -Wall -Wextra -Werror -Wcast-qual
 
 # The OpenSSL MD5 backend links against libcrypto (the others are self-contained).
 ifeq ($(HASH_BACKEND),OPENSSL_MD5)
