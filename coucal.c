@@ -279,26 +279,39 @@ static void NAME(const coucal hashtable, const char *format, ...) { \
 /* a compiled-out level must not evaluate its args ; -Wformat still applies */
 #define COUCAL_NEVER while (0)
 #define COUCAL_NO_LOG COUCAL_NEVER coucal_nolog
-#if 0
-/* Verbose. */
-DECLARE_LOG_FUNCTION(coucal_crit, coucal_log_critical)
-DECLARE_LOG_FUNCTION(coucal_warning, coucal_log_warning)
-DECLARE_LOG_FUNCTION(coucal_info, coucal_log_info)
-DECLARE_LOG_FUNCTION(coucal_debug, coucal_log_debug)
-DECLARE_LOG_FUNCTION(coucal_trace, coucal_log_trace)
-#elif 0
-/* Info. */
-DECLARE_LOG_FUNCTION(coucal_crit, coucal_log_critical)
-DECLARE_LOG_FUNCTION(coucal_warning, coucal_log_warning)
-DECLARE_LOG_FUNCTION(coucal_info, coucal_log_info)
-DECLARE_LOG_FUNCTION(coucal_debug, coucal_log_debug)
-#define coucal_trace COUCAL_NO_LOG
+
+/* every level is defined whatever the verbosity, so that a level no build
+   selects cannot rot ; unused ones are dropped (-Wno-unused-function) */
+DECLARE_LOG_FUNCTION(coucal_do_crit, coucal_log_critical)
+DECLARE_LOG_FUNCTION(coucal_do_warning, coucal_log_warning)
+DECLARE_LOG_FUNCTION(coucal_do_info, coucal_log_info)
+DECLARE_LOG_FUNCTION(coucal_do_debug, coucal_log_debug)
+DECLARE_LOG_FUNCTION(coucal_do_trace, coucal_log_trace)
+
+/* critical carries assertion failures and is never compiled out */
+#define coucal_crit coucal_do_crit
+
+#if COUCAL_LOG_LEVEL >= COUCAL_LOG_WARNING
+#define coucal_warning coucal_do_warning
 #else
-/* No logging except stats and critical. */
-DECLARE_LOG_FUNCTION(coucal_crit, coucal_log_critical)
-DECLARE_LOG_FUNCTION(coucal_warning, coucal_log_warning)
-DECLARE_LOG_FUNCTION(coucal_info, coucal_log_info)
+#define coucal_warning COUCAL_NO_LOG
+#endif
+
+#if COUCAL_LOG_LEVEL >= COUCAL_LOG_INFO
+#define coucal_info coucal_do_info
+#else
+#define coucal_info COUCAL_NO_LOG
+#endif
+
+#if COUCAL_LOG_LEVEL >= COUCAL_LOG_DEBUG
+#define coucal_debug coucal_do_debug
+#else
 #define coucal_debug COUCAL_NO_LOG
+#endif
+
+#if COUCAL_LOG_LEVEL >= COUCAL_LOG_TRACE
+#define coucal_trace coucal_do_trace
+#else
 #define coucal_trace COUCAL_NO_LOG
 #endif
 

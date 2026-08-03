@@ -186,6 +186,25 @@ typedef enum coucal_loglevel {
   coucal_log_trace
 } coucal_loglevel;
 
+/** Compile-time verbosity, selected with -DCOUCAL_LOG_LEVEL=<one of these>.
+    Levels above the selected one are compiled out of coucal.c, arguments
+    included. Numbering starts at 1 so that a misspelled name, which the
+    preprocessor reads as 0, is rejected rather than silently taken. **/
+#define COUCAL_LOG_CRITICAL 1
+#define COUCAL_LOG_WARNING 2
+#define COUCAL_LOG_INFO 3
+#define COUCAL_LOG_DEBUG 4
+#define COUCAL_LOG_TRACE 5
+
+/** Selected verbosity ; info logs the per-hashtable summary on destruction. **/
+#ifndef COUCAL_LOG_LEVEL
+#define COUCAL_LOG_LEVEL COUCAL_LOG_INFO
+#endif
+#if COUCAL_LOG_LEVEL < COUCAL_LOG_CRITICAL ||                                  \
+    COUCAL_LOG_LEVEL > COUCAL_LOG_TRACE
+#error COUCAL_LOG_LEVEL must be one of the COUCAL_LOG_* values above
+#endif
+
 /**  free handler. Only used when values are markes as xxc **/
 typedef void (*t_coucal_key_freehandler)(coucal_opaque arg,
                                          coucal_key key);
