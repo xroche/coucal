@@ -416,6 +416,7 @@ static int coucal_test_value_handler(void) {
 /* The key free-handler must fire exactly once per key returned by the dup
    handler -- on remove, and on delete for the survivors. */
 static unsigned g_key_dups, g_key_frees;
+static size_t g_stash_size;
 static coucal_key test_key_dup(coucal_opaque arg, coucal_key_const name) {
   (void) arg;
   g_key_dups++;
@@ -427,8 +428,35 @@ static void test_key_free(coucal_opaque arg, coucal_key name) {
   free(name);
 }
 
+/* Three keys per group sharing two slots: one of each group must land in the
+   stash, whatever the hash backend does. */
+static coucal_hashkeys test_key_hash(coucal_opaque arg, coucal_key_const name) {
+  const int group = atoi((const char *) name + 1) / 3;
+  coucal_hashkeys k;
+  (void) arg;
+  k.hash1 = (coucal_hashkey) (group * 3 + 1);
+  k.hash2 = (coucal_hashkey) (group * 3 + 2);
+  return k;
+}
+
+/* coucal_delete() logs the summary before releasing anything: the only public
+   window onto stash.size. */
+static void test_key_log(coucal_opaque arg, coucal_loglevel level,
+                         const char *format, va_list args) {
+  char line[1024];
+  const char *p;
+  (void) arg;
+  (void) level;
+  vsnprintf(line, sizeof(line), format, args);
+  p = strstr(line, " stash-size=");
+  if (p != NULL) {
+    g_stash_size = (size_t) atol(p + sizeof(" stash-size=") - 1);
+  }
+}
+
 static int coucal_test_key_handler(void) {
 #define KEY_HANDLER_KEYS 4096
+#define KEY_HANDLER_STASHED_KEYS 12
   coucal h = coucal_new(0);
   char b[16];
   int i;
@@ -438,7 +466,7 @@ static int coucal_test_key_handler(void) {
   coucal_value_set_key_handler(h, test_key_dup, test_key_free, NULL, NULL,
                                NULL);
 
-  /* enough keys to force rehashes and to populate the stash */
+  /* enough keys to force rehashes */
   for (i = 0; i < KEY_HANDLER_KEYS; i++) {
     snprintf(b, sizeof(b), "k%d", i);
     CHECK(coucal_write(h, b, i) != 0);
@@ -456,7 +484,24 @@ static int coucal_test_key_handler(void) {
 
   coucal_delete(&h);
   CHECK(g_key_frees == g_key_dups);
+
+  /* same contract for stashed keys, which no backend populates reliably */
+  g_key_dups = 0;
+  g_key_frees = 0;
+  g_stash_size = 0;
+  h = coucal_new(0);
+  coucal_value_set_key_handler(h, test_key_dup, test_key_free, test_key_hash,
+                               NULL, NULL);
+  coucal_set_assert_handler(h, test_key_log, NULL, NULL);
+  for (i = 0; i < KEY_HANDLER_STASHED_KEYS; i++) {
+    snprintf(b, sizeof(b), "k%d", i);
+    CHECK(coucal_write(h, b, i) != 0);
+  }
+  coucal_delete(&h);
+  CHECK(g_stash_size != 0);
+  CHECK(g_key_frees == g_key_dups);
   return EXIT_SUCCESS;
+#undef KEY_HANDLER_STASHED_KEYS
 #undef KEY_HANDLER_KEYS
 }
 
