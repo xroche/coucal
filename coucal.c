@@ -1543,8 +1543,7 @@ void coucal_delete(coucal *phashtable) {
           }
         }
 
-        /* wipe auxiliary stash values (and names) if any ; the stash.size
-           bound is load-bearing, slots above it keep stale duplicates */
+        /* wipe stash values (and names): stash.size bound is load-bearing */
         for(i = 0 ; i < hashtable->stash.size ; i++) {
           coucal_del_value_(hashtable, &hashtable->stash.items[i].value);
           if (free_names) {

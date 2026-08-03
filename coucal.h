@@ -311,9 +311,7 @@ COUCAL_EXTERN void coucal_value_set_value_handler(coucal hashtable,
 /**
  * Set handlers for keys.
  * dup: handler called to duplicate a key. if NULL, the internal pool is used.
- * free: handler called exactly once per key returned by 'dup', on removal or
- * on delete ; a write over an existing key keeps it, so neither handler runs.
- * if NULL, the internal pool is used.
+ * free: fires once per 'dup' key on removal/delete, not replace. if NULL, pool.
  * hash: hashing handler, called to hash a key. if NULL, the default hash
  * function is used.
  * equals: comparison handler, returning non-zero value when two keys are

@@ -413,8 +413,7 @@ static int coucal_test_value_handler(void) {
   return EXIT_SUCCESS;
 }
 
-/* The key free-handler must fire exactly once per key returned by the dup
-   handler -- on remove, and on delete for the survivors. */
+/* key free-handler: once per dup'd key, on remove/delete (survivors only) */
 static unsigned g_key_dups, g_key_frees;
 static size_t g_stash_size;
 static coucal_key test_key_dup(coucal_opaque arg, coucal_key_const name) {
@@ -428,8 +427,7 @@ static void test_key_free(coucal_opaque arg, coucal_key name) {
   free(name);
 }
 
-/* Three keys per group sharing two slots: one of each group must land in the
-   stash, whatever the hash backend does. */
+/* three keys per group share two hash slots, so one lands in the stash */
 static coucal_hashkeys test_key_hash(coucal_opaque arg, coucal_key_const name) {
   const int group = atoi((const char *) name + 1) / 3;
   coucal_hashkeys k;
@@ -439,8 +437,7 @@ static coucal_hashkeys test_key_hash(coucal_opaque arg, coucal_key_const name) {
   return k;
 }
 
-/* coucal_delete() logs the summary before releasing anything: the only public
-   window onto stash.size. */
+/* coucal_delete() logs the summary: only public window onto stash.size */
 static void test_key_log(coucal_opaque arg, coucal_loglevel level,
                          const char *format, va_list args) {
   char line[1024];
