@@ -280,8 +280,7 @@ static void NAME(const coucal hashtable, const char *format, ...) { \
 #define COUCAL_NEVER while (0)
 #define COUCAL_NO_LOG COUCAL_NEVER coucal_nolog
 
-/* every level is defined whatever the verbosity, so that a level no build
-   selects cannot rot ; unused ones are dropped (-Wno-unused-function) */
+/* all levels always compile (-Wno-unused-function drops unused): none rots */
 DECLARE_LOG_FUNCTION(coucal_do_crit, coucal_log_critical)
 DECLARE_LOG_FUNCTION(coucal_do_warning, coucal_log_warning)
 DECLARE_LOG_FUNCTION(coucal_do_info, coucal_log_info)

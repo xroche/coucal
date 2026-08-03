@@ -186,10 +186,9 @@ typedef enum coucal_loglevel {
   coucal_log_trace
 } coucal_loglevel;
 
-/** Compile-time verbosity, selected with -DCOUCAL_LOG_LEVEL=<one of these>.
-    Levels above the selected one are compiled out of coucal.c, arguments
-    included. Numbering starts at 1 so that a misspelled name, which the
-    preprocessor reads as 0, is rejected rather than silently taken. **/
+/** Compile-time verbosity, selected with -DCOUCAL_LOG_LEVEL. Levels above the
+    selected one are compiled out, arguments included ; numbering starts at 1 so
+    that a misspelled name, read as 0 by the preprocessor, is rejected. **/
 #define COUCAL_LOG_CRITICAL 1
 #define COUCAL_LOG_WARNING 2
 #define COUCAL_LOG_INFO 3

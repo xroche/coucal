@@ -30,7 +30,6 @@ HASH_BACKEND ?= MURMUR
 HASH_SIZE    ?= 32
 
 # --- Logging verbosity (overridable) -----------------------------------------
-# Levels above the selected one are compiled out, arguments included.
 #   LOG_LEVEL: CRITICAL | WARNING | INFO (default) | DEBUG | TRACE
 LOG_LEVEL ?= INFO
 
