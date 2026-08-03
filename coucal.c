@@ -852,6 +852,7 @@ static void coucal_del_item(coucal hashtable, coucal_item *pitem) {
 }
 
 static int coucal_add_item_(coucal hashtable, coucal_item item);
+static void coucal_drain_stash(coucal hashtable);
 
 /* Write (add or replace) a value in the hashtable. */
 static int coucal_write_value_(coucal hashtable, coucal_key_const name,
@@ -894,6 +895,11 @@ static int coucal_write_value_(coucal hashtable, coucal_key_const name,
 
   /* Statistics */
   hashtable->stats.add_count++;
+
+  /* the write turned out to be an add: reshuffling is allowed from here on */
+  if (hashtable->stash.size != 0) {
+    coucal_drain_stash(hashtable);
+  }
 
   /* otherwise we need to create a new item */
   item.name = coucal_dup_name(hashtable, name);
@@ -995,7 +1001,6 @@ static int coucal_add_item_(coucal hashtable, coucal_item item) {
 
   /* emergency stashing for the rare cases of collisions */
   if (hashtable->stash.size < STASH_SIZE) {
-    /* first hole left by a deletion, or a fresh slot past the used ones */
     size_t i;
     for (i = 0;
          i < hashtable->stash.extent && hashtable->stash.items[i].name != NULL;
@@ -1023,6 +1028,9 @@ static int coucal_add_item_(coucal hashtable, coucal_item item) {
         coucal_item *const item = &hashtable->stash.items[i];
         const size_t pos1 = coucal_hash_to_pos(hashtable, item->hashes.hash1);
         const size_t pos2 = coucal_hash_to_pos(hashtable, item->hashes.hash2);
+        if (item->name == NULL) {
+          continue;
+        }
         coucal_crit(hashtable, 
           "stash[%u]: key='%s' value='%s' pos1=%d pos2=%d"
           " hash1=%04"UINT_64_HEX_FORMAT" hash2=%04"UINT_64_HEX_FORMAT,
@@ -1076,8 +1084,8 @@ static INTHASH_INLINE int coucal_is_acceptable_pow2(size_t lg_size) {
   return lg_size <= COUCAL_HASH_SIZE && lg_size < sizeof(size_t)*8;
 }
 
-/* Reclaim stashed items whose table position became free. On the add path, not
-   on delete: a delete must not move an item backwards past an enumeration. */
+/* Never called on delete: that would move a stashed item backwards past a
+   running enumeration. */
 static void coucal_drain_stash(coucal hashtable) {
   size_t i;
 
@@ -1107,14 +1115,8 @@ static void coucal_drain_stash(coucal hashtable) {
 
 int coucal_write_value(coucal hashtable, coucal_key_const name,
                        coucal_value_const value) {
-  int ret;
-
-  if (hashtable->stash.size != 0) {
-    coucal_drain_stash(hashtable);
-  }
-
   /* replace of add item */
-  ret = coucal_write_value_(hashtable, name, value);
+  const int ret = coucal_write_value_(hashtable, name, value);
 
   /* added ? */
   if (ret) {
@@ -1212,10 +1214,12 @@ int coucal_write_value(coucal hashtable, coucal_key_const name,
         /* backup stash and reset it */
         coucal_item stash[STASH_SIZE];
         memcpy(&stash, hashtable->stash.items, sizeof(hashtable->stash.items));
+        /* stale copies above the new extent would alias live entries */
+        memset(hashtable->stash.items, 0, sizeof(hashtable->stash.items));
         hashtable->stash.extent = 0;
         hashtable->stash.size = 0;
 
-        /* insert all items, skipping the holes left by deletions */
+        /* insert all items */
         for (i = 0; i < old_extent; i++) {
           if (stash[i].name != NULL) {
             const int ret = coucal_add_item_(hashtable, stash[i]);
@@ -1361,8 +1365,8 @@ static int coucal_remove_(coucal hashtable, coucal_key_const name,
     for (i = 0; i < hashtable->stash.extent; i++) {
       if (coucal_matches_(hashtable, &hashtable->stash.items[i], name,
                            hashes)) {
-        /* leave a hole: compacting would shift the entries above it backwards,
-           past a running enumeration's cursor */
+        /* leave a hole: compacting would shift entries backwards past a
+           running enumeration's cursor */
         coucal_del_item(hashtable, &hashtable->stash.items[i]);
         hashtable->stash.size--;
         while (hashtable->stash.extent != 0 &&
@@ -1567,7 +1571,10 @@ void coucal_delete(coucal *phashtable) {
 
         /* wipe auxiliary stash values (not names) if any */
         for (i = 0; i < hashtable->stash.extent; i++) {
-          coucal_del_value_(hashtable, &hashtable->stash.items[i].value);
+          coucal_item *const item = &hashtable->stash.items[i];
+          if (item->name != NULL) {
+            coucal_del_value_(hashtable, &item->value);
+          }
         }
       }
       /* wipe top-level */
@@ -1603,7 +1610,7 @@ coucal_item *coucal_enum_next(struct_coucal_enum * e) {
     e->index++;
     return next;
   }
-  /* enumerate stash if present, skipping the holes left by deletions */
+  /* enumerate stash if present */
   for (; e->index < hash_size + e->table->stash.extent &&
          e->table->stash.items[e->index - hash_size].name == NULL;
        e->index++)

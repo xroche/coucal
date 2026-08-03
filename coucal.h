@@ -485,9 +485,10 @@ COUCAL_EXTERN int coucal_remove(coucal hashtable, coucal_key_const name);
  * Return a new enumerator.
  * A full enumeration (calling coucal_enum_next() until it returns NULL) visits
  * every entry currently in the hashtable exactly once, in an unspecified order.
- * Note: deleting entries is safe while enumerating, and every entry not yet
- * deleted is still visited exactly once ; adding entries, however, leads to
- * undefined enumeration behavior (yet safe).
+ * Note: deleting entries, or replacing the value of an existing one, is safe
+ * while enumerating, and every entry not yet deleted is still visited exactly
+ * once ; adding entries, however, leads to undefined enumeration behavior
+ * (yet safe).
  **/
 COUCAL_EXTERN struct_coucal_enum coucal_enum_new(coucal hashtable);
 
