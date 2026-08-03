@@ -161,8 +161,11 @@ struct struct_coucal {
     /** Stash items. **/
     coucal_item items[STASH_SIZE];
 
-    /** Stash size (<= STASH_SIZE). **/
+    /** Stash size (<= STASH_SIZE), holes excluded. **/
     size_t size;
+
+    /** Slots in use ; a deletion leaves a hole rather than shifting. **/
+    size_t extent;
   } stash;
 
   /** String pool. **/
@@ -622,7 +625,7 @@ static void coucal_compact_pool(coucal hashtable, size_t capacity) {
   for(i = 0 ; i < hash_size ; i++) {
     RELOCATE_STRING(hashtable->items[i].name);
   }
-  for(i = 0 ; i < hashtable->stash.size ; i++) {
+  for (i = 0; i < hashtable->stash.extent; i++) {
     RELOCATE_STRING(hashtable->stash.items[i].name);
   }
 
@@ -691,7 +694,7 @@ static void coucal_realloc_pool(coucal hashtable, size_t capacity) {
     for(i = 0 ; i < hash_size ; i++) {
       RECOMPUTE_STRING(hashtable->items[i].name);
     }
-    for(i = 0 ; i < hashtable->stash.size ; i++) {
+    for (i = 0; i < hashtable->stash.extent; i++) {
       RECOMPUTE_STRING(hashtable->stash.items[i].name);
     }
   }
@@ -893,6 +896,7 @@ static void coucal_del_item(coucal hashtable, coucal_item *pitem) {
 }
 
 static int coucal_add_item_(coucal hashtable, coucal_item item);
+static void coucal_drain_stash(coucal hashtable);
 
 /* Write (add or replace) a value in the hashtable. */
 static int coucal_write_value_(coucal hashtable, coucal_key_const name,
@@ -923,7 +927,7 @@ static int coucal_write_value_(coucal hashtable, coucal_key_const name,
   /* replace in the stash ? */
   if (hashtable->stash.size != 0) {
     size_t i;
-    for(i = 0 ; i < hashtable->stash.size ; i++) {
+    for (i = 0; i < hashtable->stash.extent; i++) {
       if (coucal_matches_(hashtable, &hashtable->stash.items[i], name, 
                            &hashes)) {
         coucal_del_value_(hashtable, &hashtable->stash.items[i].value);
@@ -935,6 +939,11 @@ static int coucal_write_value_(coucal hashtable, coucal_key_const name,
 
   /* Statistics */
   hashtable->stats.add_count++;
+
+  /* the write turned out to be an add: reshuffling is allowed from here on */
+  if (hashtable->stash.size != 0) {
+    coucal_drain_stash(hashtable);
+  }
 
   /* otherwise we need to create a new item */
   item.name = coucal_dup_name(hashtable, name);
@@ -1036,7 +1045,15 @@ static int coucal_add_item_(coucal hashtable, coucal_item item) {
 
   /* emergency stashing for the rare cases of collisions */
   if (hashtable->stash.size < STASH_SIZE) {
-    hashtable->stash.items[hashtable->stash.size] = item;
+    size_t i;
+    for (i = 0;
+         i < hashtable->stash.extent && hashtable->stash.items[i].name != NULL;
+         i++)
+      ;
+    if (i == hashtable->stash.extent) {
+      hashtable->stash.extent++;
+    }
+    hashtable->stash.items[i] = item;
     hashtable->stash.size++;
     /* for statistics */
     hashtable->stats.stash_added++;
@@ -1051,10 +1068,13 @@ static int coucal_add_item_(coucal hashtable, coucal_item item) {
     if (hashtable->custom.print.key != NULL 
       && hashtable->custom.print.value != NULL) {
       size_t i;
-      for(i = 0 ; i < hashtable->stash.size ; i++) {
+      for (i = 0; i < hashtable->stash.extent; i++) {
         coucal_item *const item = &hashtable->stash.items[i];
         const size_t pos1 = coucal_hash_to_pos(hashtable, item->hashes.hash1);
         const size_t pos2 = coucal_hash_to_pos(hashtable, item->hashes.hash2);
+        if (item->name == NULL) {
+          continue;
+        }
         coucal_crit(hashtable, 
           "stash[%u]: key='%s' value='%s' pos1=%d pos2=%d"
           " hash1=%04"UINT_64_HEX_FORMAT" hash2=%04"UINT_64_HEX_FORMAT,
@@ -1106,6 +1126,35 @@ static int coucal_add_item_(coucal hashtable, coucal_item item) {
 
 static INTHASH_INLINE int coucal_is_acceptable_pow2(size_t lg_size) {
   return lg_size <= COUCAL_HASH_SIZE && lg_size < sizeof(size_t)*8;
+}
+
+/* Never called on delete: that would move a stashed item backwards past a
+   running enumeration. */
+static void coucal_drain_stash(coucal hashtable) {
+  size_t i;
+
+  for (i = 0; i < hashtable->stash.extent; i++) {
+    coucal_item *const item = &hashtable->stash.items[i];
+    if (item->name != NULL) {
+      const size_t pos1 = coucal_hash_to_pos(hashtable, item->hashes.hash1);
+      const size_t pos2 = coucal_hash_to_pos(hashtable, item->hashes.hash2);
+      const size_t pos =
+          coucal_is_free(hashtable, pos1)
+              ? pos1
+              : (coucal_is_free(hashtable, pos2) ? pos2 : (size_t) -1);
+      if (pos != (size_t) -1) {
+        hashtable->items[pos] = *item;
+        memset(item, 0, sizeof(*item));
+        hashtable->stash.size--;
+        coucal_debug(hashtable, "debug:moved item from stash (%d entries)",
+                     (int) hashtable->stash.size);
+      }
+    }
+  }
+  while (hashtable->stash.extent != 0 &&
+         hashtable->stash.items[hashtable->stash.extent - 1].name == NULL) {
+    hashtable->stash.extent--;
+  }
 }
 
 int coucal_write_value(coucal hashtable, coucal_key_const name,
@@ -1205,19 +1254,26 @@ int coucal_write_value(coucal hashtable, coucal_key_const name,
 
       /* attempt to merge the stash if present */
       if (hashtable->stash.size != 0) {
+        const size_t old_extent = hashtable->stash.extent;
         const size_t old_size = hashtable->stash.size;
         size_t i;
 
         /* backup stash and reset it */
         coucal_item stash[STASH_SIZE];
         memcpy(&stash, hashtable->stash.items, sizeof(hashtable->stash.items));
+        /* stale copies above the new extent would alias live entries */
+        memset(hashtable->stash.items, 0, sizeof(hashtable->stash.items));
+        hashtable->stash.extent = 0;
         hashtable->stash.size = 0;
 
         /* insert all items */
-        for(i = 0 ; i < old_size ; i++) {
-          const int ret = coucal_add_item_(hashtable, stash[i]);
-          if (ret == 0) {
-            coucal_assert(hashtable, ! "hashtable duplicate key when merging the stash");
+        for (i = 0; i < old_extent; i++) {
+          if (stash[i].name != NULL) {
+            const int ret = coucal_add_item_(hashtable, stash[i]);
+            if (ret == 0) {
+              coucal_assert(hashtable,
+                            !"hashtable duplicate key when merging the stash");
+            }
           }
         }
 
@@ -1276,7 +1332,7 @@ coucal_value* coucal_fetch_value_hashes(coucal hashtable,
   /* find in stash ? */
   if (hashtable->stash.size != 0) {
     size_t i;
-    for(i = 0 ; i < hashtable->stash.size ; i++) {
+    for (i = 0; i < hashtable->stash.extent; i++) {
       if (coucal_matches_(hashtable, &hashtable->stash.items[i], name,
                           hashes)) {
         return &hashtable->stash.items[i].value;
@@ -1333,14 +1389,13 @@ int coucal_exists(coucal hashtable, coucal_key_const name) {
 }
 
 static int coucal_remove_(coucal hashtable, coucal_key_const name,
-                          const coucal_hashkeys *hashes, size_t *removed) {
+                          const coucal_hashkeys *hashes) {
   size_t pos;
 
   /* found at position 1 ? */
   pos = coucal_hash_to_pos(hashtable, hashes->hash1);
   if (coucal_matches(hashtable, pos, name, hashes)) {
     coucal_del_item(hashtable, &hashtable->items[pos]);
-    *removed = pos;
     return 1;
   }
 
@@ -1348,22 +1403,24 @@ static int coucal_remove_(coucal hashtable, coucal_key_const name,
   pos = coucal_hash_to_pos(hashtable, hashes->hash2);
   if (coucal_matches(hashtable, pos, name, hashes)) {
     coucal_del_item(hashtable, &hashtable->items[pos]);
-    *removed = pos;
     return 1;
   }
 
   /* find in stash ? */
   if (hashtable->stash.size != 0) {
     size_t i;
-    for(i = 0 ; i < hashtable->stash.size ; i++) {
+    for (i = 0; i < hashtable->stash.extent; i++) {
       if (coucal_matches_(hashtable, &hashtable->stash.items[i], name,
                            hashes)) {
+        /* leave a hole: compacting would shift entries backwards past a
+           running enumeration's cursor */
         coucal_del_item(hashtable, &hashtable->stash.items[i]);
-        for( ; i + 1 < hashtable->stash.size ; i++) {
-          hashtable->stash.items[i] = hashtable->stash.items[i + 1];
-        }
         hashtable->stash.size--;
-        *removed = (size_t) -1;
+        while (hashtable->stash.extent != 0 &&
+               hashtable->stash.items[hashtable->stash.extent - 1].name ==
+                   NULL) {
+          hashtable->stash.extent--;
+        }
         coucal_debug(hashtable, "debug:deleted item in stash (%d entries)",
           (int) hashtable->stash.size);
         return 1;
@@ -1377,38 +1434,12 @@ static int coucal_remove_(coucal hashtable, coucal_key_const name,
 
 int coucal_remove(coucal hashtable, coucal_key_const name) {
   const coucal_hashkeys hashes = coucal_calc_hashes(hashtable, name);
-  size_t removed;
-  const int ret = coucal_remove_(hashtable, name, &hashes, &removed);
+  const int ret = coucal_remove_(hashtable, name, &hashes);
 
   if (ret) {
     /* item was removed: decrease count */
     coucal_assert(hashtable, hashtable->used != 0);
     hashtable->used--;
-
-    /* can we place stash entry back to the table ? */
-    if (hashtable->stash.size != 0 && removed != (size_t) -1) {
-      size_t i;
-      for(i = 0 ; i < hashtable->stash.size ; i++) {
-        const size_t pos1 =
-          coucal_hash_to_pos(hashtable, hashtable->stash.items[i].hashes.hash1);
-        const size_t pos2 =
-          coucal_hash_to_pos(hashtable, hashtable->stash.items[i].hashes.hash2);
-        if (pos1 == removed || pos2 == removed) {
-          if (pos1 == removed) {
-            hashtable->items[pos1] = hashtable->stash.items[i];
-          } else if (pos2 == removed) {
-            hashtable->items[pos2] = hashtable->stash.items[i];
-          }
-          for( ; i + 1 < hashtable->stash.size ; i++) {
-            hashtable->stash.items[i] = hashtable->stash.items[i + 1];
-          }
-          hashtable->stash.size--;
-          coucal_debug(hashtable, "debug:moved item from stash (%d entries)",
-            (int) hashtable->stash.size);
-          break;
-        }
-      }
-    }
   }
 
   return ret;
@@ -1459,6 +1490,7 @@ coucal coucal_new(size_t initial_size) {
     hashtable->lg_size = lg_size;
     hashtable->items = items;
     hashtable->used = 0;
+    hashtable->stash.extent = 0;
     hashtable->stash.size = 0;
     hashtable->pool.buffer = NULL;
     hashtable->pool.size = 0;
@@ -1596,11 +1628,14 @@ void coucal_delete(coucal *phashtable) {
           }
         }
 
-        /* wipe stash values (and names): stash.size bound is load-bearing */
-        for(i = 0 ; i < hashtable->stash.size ; i++) {
-          coucal_del_value_(hashtable, &hashtable->stash.items[i].value);
-          if (free_names) {
-            coucal_del_name(hashtable, &hashtable->stash.items[i]);
+        /* wipe stash values (and names); holes below extent are not live */
+        for (i = 0; i < hashtable->stash.extent; i++) {
+          coucal_item *const item = &hashtable->stash.items[i];
+          if (item->name != NULL) {
+            coucal_del_value_(hashtable, &item->value);
+            if (free_names) {
+              coucal_del_name(hashtable, item);
+            }
           }
         }
       }
@@ -1638,16 +1673,17 @@ coucal_item *coucal_enum_next(struct_coucal_enum * e) {
     return next;
   }
   /* enumerate stash if present */
-  else if (e->index < hash_size + e->table->stash.size) {
-    const size_t index = e->index - hash_size;
-    coucal_item *const next = &e->table->stash.items[index];
+  for (; e->index < hash_size + e->table->stash.extent &&
+         e->table->stash.items[e->index - hash_size].name == NULL;
+       e->index++)
+    ;
+  if (e->index < hash_size + e->table->stash.extent) {
+    coucal_item *const next = &e->table->stash.items[e->index - hash_size];
     e->index++;
     return next;
   }
   /* eof */
-  else {
-    return NULL;
-  }
+  return NULL;
 }
 
 void coucal_set_global_assert_handler(t_coucal_loghandler log,
