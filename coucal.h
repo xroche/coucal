@@ -296,11 +296,11 @@ COUCAL_EXTERN void coucal_value_is_malloc(coucal hashtable, int flag);
 
 /**
  * Set handlers for values.
- * free: this handler is called exactly once for every value that leaves the
- * hashtable: when its entry is removed (coucal_remove), when a new write for
- * the same key replaces it (the old value is freed), and for every remaining
- * entry when the hashtable is destroyed (coucal_delete). if NULL, values
- * won't be free'd.
+ * free: this handler is called exactly once for every value whose ptr member is
+ * not NULL and that leaves the hashtable: when its entry is removed
+ * (coucal_remove), when a new write for the same key replaces it (the old value
+ * is freed), and for every remaining entry when the hashtable is destroyed
+ * (coucal_delete). if NULL, values won't be free'd.
  * arg: opaque custom argument to be used by functions.
  * Handler(s) MUST NOT be changed once elements have been added.
  **/
@@ -363,6 +363,7 @@ COUCAL_EXTERN const char* coucal_get_name(coucal hashtable);
 /**
  * Read an integer entry from the hashtable.
  * Return non-zero value upon success and sets intvalue.
+ * intvalue may be NULL, to only probe the entry presence.
  **/
 COUCAL_EXTERN int coucal_read(coucal hashtable, coucal_key_const name,
                               intptr_t * intvalue);

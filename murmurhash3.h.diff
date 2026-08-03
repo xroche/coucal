@@ -1,6 +1,6 @@
 --- murmurhash3.h.orig
 +++ murmurhash3.h
-@@ -7,16 +7,34 @@
+@@ -7,16 +7,33 @@
  // compile and run any of them on any platform, but your performance with the
  // non-native version will be less than optimal.
  
@@ -26,27 +26,46 @@
  }
  #define ROTL32(x,y)     rotl32(x,y)
 -static uint32_t getblock32 ( const uint32_t * p, int i )
-+static uint32_t getblock32 ( const uint8_t * p, int i )
- {
+-{
 -  return p[i];
++static uint32_t getblock32(const uint8_t *p, ptrdiff_t i) {
 +  /* memcpy the 32-bit block: defined on any alignment, and lowered to the same
 +     single load as p[i] on hosts that tolerate unaligned access. */
 +  uint32_t v;
-+  memcpy(&v, p + (ptrdiff_t) i * 4, sizeof(v));
++  memcpy(&v, p + i * 4, sizeof(v));
 +  return v;
  }
  static uint32_t fmix32 ( uint32_t h )
  {
-@@ -44,7 +62,7 @@
+@@ -29,10 +46,11 @@
+   return h;
+ }
+ #define BIG_CONSTANT(x) (x##LLU)
+-static void MurmurHash3_x86_128 ( const void * key, const int len,
+-                                  uint32_t seed, void * out ) {
++/* len is a size_t: an int length turns negative past 2GB. */
++static void MurmurHash3_x86_128(const void *key, const size_t len,
++                                uint32_t seed, void *out) {
+   const uint8_t * data = (const uint8_t*)key;
+-  const int nblocks = len / 16;
++  const ptrdiff_t nblocks = (ptrdiff_t) (len / 16);
+ 
+   uint32_t h1 = seed;
+   uint32_t h2 = seed;
+@@ -44,9 +62,9 @@
    const uint32_t c3 = 0x38b34ae5; 
    const uint32_t c4 = 0xa1e38b93;
  
 -  const uint32_t * blocks = (const uint32_t *)(data + nblocks*16);
+-  int i;
+-  
 +  const uint8_t * blocks = data + nblocks*16;
-   int i;
-   
++  ptrdiff_t i;
++
    for(i = -nblocks; i; i++)
-@@ -79,31 +97,40 @@
+   {
+     uint32_t k1 = getblock32(blocks,i*4+0);
+@@ -79,34 +97,45 @@
    uint32_t k3 = 0;
    uint32_t k4 = 0;
  
@@ -96,9 +115,17 @@
 +  case  1: k1 ^= (uint32_t)tail[ 0] << 0;
             k1 *= c1; k1  = ROTL32(k1,15); k1 *= c2; h1 ^= k1;
    };
+-
+-
+-  h1 ^= len; h2 ^= len; h3 ^= len; h4 ^= len;
 +#if defined(__GNUC__) || defined(__clang__)
 +#pragma GCC diagnostic pop
 +#endif
++
++  h1 ^= (uint32_t) len;
++  h2 ^= (uint32_t) len;
++  h3 ^= (uint32_t) len;
++  h4 ^= (uint32_t) len;
  
- 
-   h1 ^= len; h2 ^= len; h3 ^= len; h4 ^= len;
+   h1 += h2; h1 += h3; h1 += h4;
+   h2 += h1; h3 += h1; h4 += h1;

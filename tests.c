@@ -412,6 +412,64 @@ static int coucal_test_value_handler(void) {
   return EXIT_SUCCESS;
 }
 
+static unsigned g_printed;
+static const char *test_print_key(coucal_opaque arg, coucal_key_const name) {
+  (void) arg;
+  g_printed++;
+  return (const char *) name;
+}
+static const char *test_print_value(coucal_opaque arg,
+                                    coucal_value_const value) {
+  (void) arg;
+  (void) value;
+  return "?";
+}
+
+static char g_logged[1024];
+static void test_log_handler(coucal_opaque arg, coucal_loglevel level,
+                             const char *format, va_list args) {
+  (void) arg;
+  (void) level;
+  vsnprintf(g_logged, sizeof(g_logged), format, args);
+}
+
+static int coucal_test_hardening(void) {
+  coucal h = coucal_new(0);
+  int i;
+
+  /* debug and trace are compiled out here: their arguments, print handlers
+     included, must never be evaluated */
+  g_printed = 0;
+  coucal_set_print_handler(h, test_print_key, test_print_value, NULL);
+  for (i = 0; i < 5000; i++) {
+    char b[24];
+    snprintf(b, sizeof(b), "hard_%d", i);
+    coucal_write(h, b, (intptr_t) (i + 1));
+  }
+  CHECK(g_printed == 0);
+
+  /* coucal_readptr() tolerates a NULL value, just like coucal_read() */
+  CHECK(coucal_readptr(h, "hard_0", NULL) != 0);
+  CHECK(coucal_readptr(h, "absent", NULL) == 0);
+  coucal_write(h, "zero", 0);
+  CHECK(coucal_readptr(h, "zero", NULL) == 0);
+
+  /* the empty key is the one shared, read-only entry of the string pool */
+  CHECK(coucal_write(h, "", 7) != 0);
+  CHECK(coucal_get_intptr(h, "") == 7);
+  CHECK(coucal_remove(h, "") != 0);
+  coucal_delete(&h);
+
+  /* an empty table must not report a 0/0 average */
+  h = coucal_new(0);
+  coucal_set_assert_handler(h, test_log_handler, NULL, NULL);
+  g_logged[0] = '\0';
+  coucal_delete(&h);
+  CHECK(strstr(g_logged, "avg-moved=0 ") != NULL);
+  CHECK(strstr(g_logged, "nan") == NULL);
+  return EXIT_SUCCESS;
+}
+
 /* Differential test: drive coucal and a trivial reference model with the same
    deterministic pseudo-random op stream and assert they never diverge. The
    key space is bounded so inserts, replaces, removes and lookups all collide
@@ -507,6 +565,9 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   }
   if (coucal_test_value_handler() != EXIT_SUCCESS) {
+    return EXIT_FAILURE;
+  }
+  if (coucal_test_hardening() != EXIT_SUCCESS) {
     return EXIT_FAILURE;
   }
   if (coucal_test_oracle() != EXIT_SUCCESS) {
