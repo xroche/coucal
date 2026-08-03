@@ -737,7 +737,8 @@ static coucal_key coucal_dup_name_internal(coucal hashtable,
   /* the pool does not allow empty strings for safety purpose ; handhe that
     (keys are being emptied when free'd to detect duplicate free) */
   if (len == 1) {
-    return (coucal_key) the_empty_string;
+    /* uintptr_t round-trip: this key alone is const, a cast would discard it */
+    return (coucal_key) (uintptr_t) the_empty_string;
   }
 
   /* expand pool capacity */

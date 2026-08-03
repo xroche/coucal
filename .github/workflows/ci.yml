@@ -202,7 +202,7 @@ jobs:
       - name: Compile the bundled-MD5 branch (32- and 64-bit)
         run: |
           set -euo pipefail
-          flags="-O2 -g -W -Wall -Wextra -Werror -Wno-unused-function \
+          flags="-O2 -g -W -Wall -Wextra -Werror -Wno-unused-function -Wcast-qual \
             -D_REENTRANT -Ici/md5-stub -DHTS_INTHASH_USES_MD5"
           cc $flags -c coucal.c -o /dev/null
           cc $flags -DCOUCAL_HASH_SIZE=64 -c coucal.c -o /dev/null
