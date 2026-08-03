@@ -661,8 +661,10 @@ static int coucal_test_hardening(void) {
     coucal_write(h, b, (intptr_t) (i + 1));
   }
   CHECK(KEYS_PRINTED ? g_printed != 0 : g_printed == 0);
-  /* enum n is threshold n+1 ; no level above the selected one is logged */
-  CHECK(g_max_level < COUCAL_LOG_LEVEL);
+  /* inserting logs at debug and trace only, and at exactly the selected level
+     when one of them is compiled in (enum n is threshold n+1) */
+  CHECK(g_max_level ==
+        (COUCAL_LOG_LEVEL >= COUCAL_LOG_DEBUG ? COUCAL_LOG_LEVEL - 1 : -1));
 
   CHECK(coucal_read(h, "hard_0", NULL) != 0);
   CHECK(coucal_readptr(h, "hard_0", NULL) != 0);
@@ -675,12 +677,15 @@ static int coucal_test_hardening(void) {
   CHECK(coucal_get_intptr(h, "") == 7);
   CHECK(coucal_remove(h, "") != 0);
   g_logged[0] = '\0';
+  g_max_level = -1;
   coucal_delete(&h);
 
   if (!STATS_LOGGED) {
     CHECK(g_logged[0] == '\0');
+    CHECK(g_max_level == -1);
     return EXIT_SUCCESS;
   }
+  CHECK(g_max_level == coucal_log_info); /* destruction logs the summary only */
 
   /* a non-zero move count proves the cuckoo path above was not vacuous */
   moved = strstr(g_logged, " moved=");
