@@ -33,6 +33,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -502,14 +503,39 @@ static int coucal_test_oracle(void) {
 /* Deleting during an enumeration must not hide a surviving entry. Three keys
    per (hash1, hash2) pair, two table slots: the stash is always occupied. */
 #define ENUM_DEL_KEYS 12
+#define ENUM_DEL_STASHED 4
+#define ENUM_DEL_FILLER 100
+#define ENUM_DEL_FILLERS 5
 static coucal_hashkeys enum_del_hash(coucal_opaque arg, coucal_key_const name) {
   coucal_hashkeys k;
-  const int id = atoi((const char *) name + 1) % 4;
+  const int id = atoi((const char *) name + 1);
   (void) arg;
   /* small values, so the positions survive the table doublings */
-  k.hash1 = (coucal_hashkey) (id * 3 + 1);
-  k.hash2 = (coucal_hashkey) (id * 3 + 2);
+  if (id < ENUM_DEL_FILLER) {
+    k.hash1 = (coucal_hashkey) ((id % 4) * 3);
+    k.hash2 = (coucal_hashkey) ((id % 4) * 3 + 1);
+  } else {
+    /* free slots: fillers grow the table without touching the stash */
+    k.hash1 = (coucal_hashkey) (12 + (id - ENUM_DEL_FILLER) * 2);
+    k.hash2 = (coucal_hashkey) (13 + (id - ENUM_DEL_FILLER) * 2);
+  }
   return k;
+}
+
+/* coucal_delete() logs the summary before releasing anything: the only public
+   window onto stash.size. */
+static size_t enum_del_stash_size;
+static void enum_del_log(coucal_opaque arg, coucal_loglevel level,
+                         const char *format, va_list args) {
+  char line[1024];
+  const char *p;
+  (void) arg;
+  (void) level;
+  vsnprintf(line, sizeof(line), format, args);
+  p = strstr(line, " stash-size=");
+  if (p != NULL) {
+    enum_del_stash_size = (size_t) atol(p + sizeof(" stash-size=") - 1);
+  }
 }
 
 static coucal enum_del_fill(void) {
@@ -517,6 +543,7 @@ static coucal enum_del_fill(void) {
   int i;
 
   coucal_value_set_key_handler(h, NULL, NULL, enum_del_hash, NULL, NULL);
+  coucal_set_assert_handler(h, enum_del_log, NULL, NULL);
   for (i = 0; i < ENUM_DEL_KEYS; i++) {
     char key[16];
     snprintf(key, sizeof(key), "k%d", i);
@@ -525,17 +552,49 @@ static coucal enum_del_fill(void) {
   return h;
 }
 
+/* Collect the names in enumeration order ; -1 on a hole or an overflow. */
+static int enum_del_order(coucal h, char order[][16], int max) {
+  struct_coucal_enum e = coucal_enum_new(h);
+  coucal_item *it;
+  int n = 0;
+
+  while ((it = coucal_enum_next(&e)) != NULL) {
+    if (it->name == NULL || n == max) {
+      return -1;
+    }
+    snprintf(order[n++], 16, "%s", (const char *) it->name);
+  }
+  return n;
+}
+
+static int enum_del_index(char order[][16], int n, const char *name) {
+  int i;
+
+  for (i = 0; i < n; i++) {
+    if (strcmp(order[i], name) == 0) {
+      return i;
+    }
+  }
+  return -1;
+}
+
 static int coucal_test_enum_delete(void) {
-  coucal h = enum_del_fill();
+  coucal h;
   struct_coucal_enum e;
   coucal_item *it;
   int seen[ENUM_DEL_KEYS];
   char victim[16];
+  char kept[16];
   int i, n;
 
+  /* an empty stash would degrade every sub-test to a plain table walk */
+  enum_del_stash_size = 0;
+  h = enum_del_fill();
   CHECK(coucal_nitems(h) == ENUM_DEL_KEYS);
+  coucal_delete(&h);
+  CHECK(enum_del_stash_size == ENUM_DEL_STASHED);
 
-  /* delete an entry already yielded, in the middle of the walk */
+  h = enum_del_fill();
   memset(seen, 0, sizeof(seen));
   victim[0] = '\0';
   n = 0;
@@ -558,7 +617,32 @@ static int coucal_test_enum_delete(void) {
   CHECK(coucal_nitems(h) == ENUM_DEL_KEYS - 1);
   coucal_delete(&h);
 
-  /* drain the whole table through a single enumeration */
+  /* a write that only replaces must not promote a stashed entry either */
+  h = enum_del_fill();
+  memset(seen, 0, sizeof(seen));
+  victim[0] = kept[0] = '\0';
+  n = 0;
+  e = coucal_enum_new(h);
+  while ((it = coucal_enum_next(&e)) != NULL) {
+    const int id = atoi((const char *) it->name + 1);
+    CHECK(id >= 0 && id < ENUM_DEL_KEYS);
+    CHECK(!seen[id]);
+    seen[id] = 1;
+    if (++n == 1) {
+      snprintf(victim, sizeof(victim), "%s", (const char *) it->name);
+    } else if (n == 2) {
+      snprintf(kept, sizeof(kept), "%s", (const char *) it->name);
+    } else if (n == 3) {
+      CHECK(coucal_remove(h, victim));
+      CHECK(coucal_write(h, kept, -1) == 0);
+    }
+  }
+  CHECK(n == ENUM_DEL_KEYS);
+  for (i = 0; i < ENUM_DEL_KEYS; i++) {
+    CHECK(seen[i]);
+  }
+  coucal_delete(&h);
+
   h = enum_del_fill();
   memset(seen, 0, sizeof(seen));
   n = 0;
@@ -580,6 +664,67 @@ static int coucal_test_enum_delete(void) {
   coucal_delete(&h);
 
   return EXIT_SUCCESS;
+}
+
+/* A deletion in the middle of the stash leaves a hole every other stash walk
+   must step over. */
+static int coucal_test_sparse_stash(void) {
+#define ENUM_DEL_ORDER (ENUM_DEL_KEYS + ENUM_DEL_FILLERS)
+  coucal h = enum_del_fill();
+  char order[ENUM_DEL_ORDER][16];
+  char below[16], victim[16], above[16];
+  const int first = ENUM_DEL_KEYS - ENUM_DEL_STASHED;
+  intptr_t value;
+  int i, n;
+
+  /* the stash comes last: take a victim with a survivor on either side */
+  n = enum_del_order(h, order, ENUM_DEL_ORDER);
+  CHECK(n == ENUM_DEL_KEYS);
+  snprintf(below, sizeof(below), "%s", order[first]);
+  snprintf(victim, sizeof(victim), "%s", order[first + 1]);
+  snprintf(above, sizeof(above), "%s", order[first + 2]);
+  CHECK(coucal_remove(h, victim));
+  CHECK(coucal_nitems(h) == ENUM_DEL_KEYS - 1);
+
+  for (i = 0; i < ENUM_DEL_KEYS; i++) {
+    char key[16];
+    snprintf(key, sizeof(key), "k%d", i);
+    if (strcmp(key, victim) != 0) {
+      CHECK(coucal_read(h, key, &value));
+      CHECK(value == i);
+    }
+  }
+
+  n = enum_del_order(h, order, ENUM_DEL_ORDER);
+  CHECK(n == ENUM_DEL_KEYS - 1);
+  CHECK(enum_del_index(order, n, victim) == -1);
+
+  /* the next stashed entry reuses the hole, back between its two neighbours */
+  CHECK(coucal_write(h, "k12", 12));
+  n = enum_del_order(h, order, ENUM_DEL_ORDER);
+  CHECK(n == ENUM_DEL_KEYS);
+  CHECK(enum_del_index(order, n, above) == enum_del_index(order, n, below) + 2);
+
+  /* rehash with a hole in the stash */
+  CHECK(coucal_remove(h, above));
+  for (i = 0; i < ENUM_DEL_FILLERS; i++) {
+    char key[16];
+    snprintf(key, sizeof(key), "k%d", ENUM_DEL_FILLER + i);
+    CHECK(coucal_write(h, key, ENUM_DEL_FILLER + i));
+  }
+  CHECK(coucal_nitems(h) == ENUM_DEL_KEYS - 1 + ENUM_DEL_FILLERS);
+  n = enum_del_order(h, order, ENUM_DEL_ORDER);
+  CHECK(n == (int) coucal_nitems(h));
+
+  enum_del_stash_size = 0;
+  coucal_delete(&h);
+  CHECK(enum_del_stash_size != 0);
+
+  return EXIT_SUCCESS;
+#undef ENUM_DEL_ORDER
+#undef ENUM_DEL_FILLERS
+#undef ENUM_DEL_FILLER
+#undef ENUM_DEL_STASHED
 #undef ENUM_DEL_KEYS
 }
 
@@ -597,6 +742,9 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   }
   if (coucal_test_enum_delete() != EXIT_SUCCESS) {
+    return EXIT_FAILURE;
+  }
+  if (coucal_test_sparse_stash() != EXIT_SUCCESS) {
     return EXIT_FAILURE;
   }
   if (argc == 2) {
