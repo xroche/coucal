@@ -435,12 +435,14 @@ static void test_log_handler(coucal_opaque arg, coucal_loglevel level,
 
 static int coucal_test_hardening(void) {
   coucal h = coucal_new(0);
+  const char *moved;
+  unsigned long cuckoo_moved = 0;
   int i;
 
-  /* debug and trace are compiled out here: their arguments, print handlers
-     included, must never be evaluated */
+  /* compiled-out levels must not call the print handler */
   g_printed = 0;
   coucal_set_print_handler(h, test_print_key, test_print_value, NULL);
+  coucal_set_assert_handler(h, test_log_handler, NULL, NULL);
   for (i = 0; i < 5000; i++) {
     char b[24];
     snprintf(b, sizeof(b), "hard_%d", i);
@@ -448,7 +450,7 @@ static int coucal_test_hardening(void) {
   }
   CHECK(g_printed == 0);
 
-  /* coucal_readptr() tolerates a NULL value, just like coucal_read() */
+  CHECK(coucal_read(h, "hard_0", NULL) != 0);
   CHECK(coucal_readptr(h, "hard_0", NULL) != 0);
   CHECK(coucal_readptr(h, "absent", NULL) == 0);
   coucal_write(h, "zero", 0);
@@ -458,7 +460,14 @@ static int coucal_test_hardening(void) {
   CHECK(coucal_write(h, "", 7) != 0);
   CHECK(coucal_get_intptr(h, "") == 7);
   CHECK(coucal_remove(h, "") != 0);
+  g_logged[0] = '\0';
   coucal_delete(&h);
+
+  /* the compiled-out call sites are on the cuckoo path only */
+  moved = strstr(g_logged, " moved=");
+  CHECK(moved != NULL);
+  CHECK(sscanf(moved, " moved=%lu", &cuckoo_moved) == 1);
+  CHECK(cuckoo_moved != 0);
 
   /* an empty table must not report a 0/0 average */
   h = coucal_new(0);

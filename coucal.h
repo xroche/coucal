@@ -370,6 +370,7 @@ COUCAL_EXTERN int coucal_read(coucal hashtable, coucal_key_const name,
 
 /**
  * Same as coucal_read(), but return 0 is the value was zero.
+ * intvalue may be NULL, to only probe for a present and non-zero entry.
  **/
 COUCAL_EXTERN int coucal_readptr(coucal hashtable, coucal_key_const name,
                                  intptr_t * intvalue);

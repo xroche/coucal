@@ -46,7 +46,7 @@ static uint32_t fmix32 ( uint32_t h )
   return h;
 }
 #define BIG_CONSTANT(x) (x##LLU)
-/* len is a size_t: an int length turns negative past 2GB. */
+/* an int len turns negative past 2GB, and the block loop then reads OOB */
 static void MurmurHash3_x86_128(const void *key, const size_t len,
                                 uint32_t seed, void *out) {
   const uint8_t * data = (const uint8_t*)key;

@@ -273,8 +273,7 @@ static void NAME(const coucal hashtable, const char *format, ...) { \
   coucal_log(hashtable, LEVEL, format, args); \
   va_end(args); \
 }
-/* A compiled-out level must not evaluate its arguments: they include the user's
-   print handlers. The dead branch keeps -Wformat checking. */
+/* a compiled-out level must not evaluate its args ; -Wformat still applies */
 #define COUCAL_NEVER while (0)
 #define COUCAL_NO_LOG COUCAL_NEVER coucal_nolog
 #if 0
@@ -365,44 +364,50 @@ const char* coucal_get_name(coucal hashtable) {
 
 static void coucal_log_stats(coucal hashtable) {
   const char *const name = coucal_get_name(hashtable);
-  /* an empty table has no add to average the cuckoo moves over */
   const double avg_moved =
       hashtable->stats.add_count != 0
           ? (double) hashtable->stats.cuckoo_moved / hashtable->stats.add_count
           : 0.0;
-  coucal_info(hashtable,
-              "hashtable %s%s%ssummary: "
-              "size=%" UINT_64_FORMAT " (lg2=%" UINT_64_FORMAT ") "
-              "used=%" UINT_64_FORMAT " "
-              "stash-size=%" UINT_64_FORMAT " "
-              "pool-size=%" UINT_64_FORMAT " "
-              "pool-capacity=%" UINT_64_FORMAT " "
-              "pool-used=%" UINT_64_FORMAT " "
-              "writes=%" UINT_64_FORMAT " "
-              "(new=%" UINT_64_FORMAT ") "
-              "moved=%" UINT_64_FORMAT " "
-              "stashed=%" UINT_64_FORMAT " "
-              "max-stash-size=%" UINT_64_FORMAT " "
-              "avg-moved=%g "
-              "rehash=%" UINT_64_FORMAT " "
-              "pool-compact=%" UINT_64_FORMAT " "
-              "pool-realloc=%" UINT_64_FORMAT " "
-              "memory=%" UINT_64_FORMAT,
-              name != NULL ? "\"" : "", name != NULL ? name : "",
-              name != NULL ? "\" " : "", (uint64_t) POW2(hashtable->lg_size),
-              (uint64_t) hashtable->lg_size, (uint64_t) hashtable->used,
-              (uint64_t) hashtable->stash.size, (uint64_t) hashtable->pool.size,
-              (uint64_t) hashtable->pool.capacity,
-              (uint64_t) hashtable->pool.used,
-              (uint64_t) hashtable->stats.write_count,
-              (uint64_t) hashtable->stats.add_count,
-              (uint64_t) hashtable->stats.cuckoo_moved,
-              (uint64_t) hashtable->stats.stash_added,
-              (uint64_t) hashtable->stats.max_stash_size, avg_moved,
-              (uint64_t) hashtable->stats.rehash_count,
-              (uint64_t) hashtable->stats.pool_compact_count,
-              (uint64_t) hashtable->stats.pool_realloc_count,
-              (uint64_t) coucal_memory_size(hashtable));
+  /* clang-format off */
+  coucal_info(hashtable, "hashtable %s%s%ssummary: "
+               "size=%"UINT_64_FORMAT" (lg2=%"UINT_64_FORMAT") "
+               "used=%"UINT_64_FORMAT" "
+               "stash-size=%"UINT_64_FORMAT" "
+               "pool-size=%"UINT_64_FORMAT" "
+               "pool-capacity=%"UINT_64_FORMAT" "
+               "pool-used=%"UINT_64_FORMAT" "
+               "writes=%"UINT_64_FORMAT" "
+               "(new=%"UINT_64_FORMAT") "
+               "moved=%"UINT_64_FORMAT " "
+               "stashed=%"UINT_64_FORMAT" "
+               "max-stash-size=%"UINT_64_FORMAT" "
+               "avg-moved=%g "
+               "rehash=%"UINT_64_FORMAT" "
+               "pool-compact=%"UINT_64_FORMAT" "
+               "pool-realloc=%"UINT_64_FORMAT" "
+               "memory=%"UINT_64_FORMAT,
+               name != NULL ? "\"" : "",
+               name != NULL ? name : "",
+               name != NULL ? "\" " : "",
+               (uint64_t) POW2(hashtable->lg_size),
+               (uint64_t) hashtable->lg_size,
+               (uint64_t) hashtable->used,
+               (uint64_t) hashtable->stash.size,
+               (uint64_t) hashtable->pool.size,
+               (uint64_t) hashtable->pool.capacity,
+               (uint64_t) hashtable->pool.used,
+               (uint64_t) hashtable->stats.write_count,
+               (uint64_t) hashtable->stats.add_count,
+               (uint64_t) hashtable->stats.cuckoo_moved,
+               (uint64_t) hashtable->stats.stash_added,
+               (uint64_t) hashtable->stats.max_stash_size,
+               avg_moved,
+               (uint64_t) hashtable->stats.rehash_count,
+               (uint64_t) hashtable->stats.pool_compact_count,
+               (uint64_t) hashtable->stats.pool_realloc_count,
+               (uint64_t) coucal_memory_size(hashtable)
+               );
+  /* clang-format on */
 }
 
 /* default hash function when key is a regular C-string */
