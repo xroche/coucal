@@ -148,7 +148,7 @@ static int coucal_test(const char *snum) {
         const char *name;
         /* unsigned: this LCG overflows a 32-bit long on ILP32 */
         const long expected =
-          (long) ((unsigned long) i * 1664525UL + 1013904223UL);
+            (long) ((unsigned long) i * 1664525UL + 1013904223UL);
         if (strings == NULL) {
           snprintf(buffer, sizeof(buffer),
             "http://www.example.com/website/sample/for/hashtable/"
