@@ -40,6 +40,10 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "coucal.h"
 
+/* checks below read coucal's own log output, which the build may compile out */
+#define STATS_LOGGED (COUCAL_LOG_LEVEL >= COUCAL_LOG_INFO)
+#define KEYS_PRINTED (COUCAL_LOG_LEVEL >= COUCAL_LOG_TRACE)
+
 static size_t fsize(const char *s) {
   struct stat st;
 
@@ -609,7 +613,7 @@ static int coucal_test_key_handler(void) {
     CHECK(coucal_write(h, b, i) != 0);
   }
   coucal_delete(&h);
-  CHECK(g_stash_size != 0);
+  CHECK(!STATS_LOGGED || g_stash_size != 0);
   CHECK(g_key_frees == g_key_dups);
   return EXIT_SUCCESS;
 #undef KEY_HANDLER_STASHED_KEYS
@@ -630,10 +634,13 @@ static const char *test_print_value(coucal_opaque arg,
 }
 
 static char g_logged[1024];
+static int g_max_level;
 static void test_log_handler(coucal_opaque arg, coucal_loglevel level,
                              const char *format, va_list args) {
   (void) arg;
-  (void) level;
+  if ((int) level > g_max_level) {
+    g_max_level = (int) level;
+  }
   vsnprintf(g_logged, sizeof(g_logged), format, args);
 }
 
@@ -643,8 +650,9 @@ static int coucal_test_hardening(void) {
   unsigned long cuckoo_moved = 0;
   int i;
 
-  /* compiled-out levels must not call the print handler */
+  /* the key-printing call sites all sit at trace level */
   g_printed = 0;
+  g_max_level = -1;
   coucal_set_print_handler(h, test_print_key, test_print_value, NULL);
   coucal_set_assert_handler(h, test_log_handler, NULL, NULL);
   for (i = 0; i < 5000; i++) {
@@ -652,7 +660,11 @@ static int coucal_test_hardening(void) {
     snprintf(b, sizeof(b), "hard_%d", i);
     coucal_write(h, b, (intptr_t) (i + 1));
   }
-  CHECK(g_printed == 0);
+  CHECK(KEYS_PRINTED ? g_printed != 0 : g_printed == 0);
+  /* inserting logs at debug and trace only, and at exactly the selected level
+     when one of them is compiled in (enum n is threshold n+1) */
+  CHECK(g_max_level ==
+        (COUCAL_LOG_LEVEL >= COUCAL_LOG_DEBUG ? COUCAL_LOG_LEVEL - 1 : -1));
 
   CHECK(coucal_read(h, "hard_0", NULL) != 0);
   CHECK(coucal_readptr(h, "hard_0", NULL) != 0);
@@ -665,9 +677,17 @@ static int coucal_test_hardening(void) {
   CHECK(coucal_get_intptr(h, "") == 7);
   CHECK(coucal_remove(h, "") != 0);
   g_logged[0] = '\0';
+  g_max_level = -1;
   coucal_delete(&h);
 
-  /* the compiled-out call sites are on the cuckoo path only */
+  if (!STATS_LOGGED) {
+    CHECK(g_logged[0] == '\0');
+    CHECK(g_max_level == -1);
+    return EXIT_SUCCESS;
+  }
+  CHECK(g_max_level == coucal_log_info); /* destruction logs the summary only */
+
+  /* a non-zero move count proves the cuckoo path above was not vacuous */
   moved = strstr(g_logged, " moved=");
   CHECK(moved != NULL);
   CHECK(sscanf(moved, " moved=%lu", &cuckoo_moved) == 1);
@@ -980,7 +1000,7 @@ static int coucal_test_enum_delete(void) {
   h = enum_del_fill();
   CHECK(coucal_nitems(h) == ENUM_DEL_KEYS);
   coucal_delete(&h);
-  CHECK(enum_del_stash_size == ENUM_DEL_STASHED);
+  CHECK(!STATS_LOGGED || enum_del_stash_size == ENUM_DEL_STASHED);
 
   h = enum_del_fill();
   memset(seen, 0, sizeof(seen));
@@ -1106,7 +1126,7 @@ static int coucal_test_sparse_stash(void) {
 
   enum_del_stash_size = 0;
   coucal_delete(&h);
-  CHECK(enum_del_stash_size != 0);
+  CHECK(!STATS_LOGGED || enum_del_stash_size != 0);
 
   return EXIT_SUCCESS;
 #undef ENUM_DEL_ORDER

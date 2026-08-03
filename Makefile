@@ -29,9 +29,14 @@ CFLAGS  ?= -O3 -g
 HASH_BACKEND ?= MURMUR
 HASH_SIZE    ?= 32
 
+# --- Logging verbosity (overridable) -----------------------------------------
+#   LOG_LEVEL: CRITICAL | WARNING | INFO (default) | DEBUG | TRACE
+LOG_LEVEL ?= INFO
+
 override CPPFLAGS += -D_REENTRANT -D_GNU_SOURCE \
                     -DHTS_INTHASH_USES_$(HASH_BACKEND) \
-                    -DCOUCAL_HASH_SIZE=$(HASH_SIZE)
+                    -DCOUCAL_HASH_SIZE=$(HASH_SIZE) \
+                    -DCOUCAL_LOG_LEVEL=COUCAL_LOG_$(LOG_LEVEL)
 # -Wcast-qual is implied by neither -Wall nor -Wextra, and HTTrack builds with it.
 override CFLAGS   += -fPIC -pthread \
                     -W -Wall -Wextra -Werror -Wno-unused-function -Wcast-qual
