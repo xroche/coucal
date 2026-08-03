@@ -499,6 +499,90 @@ static int coucal_test_oracle(void) {
 #undef ORACLE_OPS
 }
 
+/* Deleting during an enumeration must not hide a surviving entry. Three keys
+   per (hash1, hash2) pair, two table slots: the stash is always occupied. */
+#define ENUM_DEL_KEYS 12
+static coucal_hashkeys enum_del_hash(coucal_opaque arg, coucal_key_const name) {
+  coucal_hashkeys k;
+  const int id = atoi((const char *) name + 1) % 4;
+  (void) arg;
+  /* small values, so the positions survive the table doublings */
+  k.hash1 = (coucal_hashkey) (id * 3 + 1);
+  k.hash2 = (coucal_hashkey) (id * 3 + 2);
+  return k;
+}
+
+static coucal enum_del_fill(void) {
+  coucal h = coucal_new(0);
+  int i;
+
+  coucal_value_set_key_handler(h, NULL, NULL, enum_del_hash, NULL, NULL);
+  for (i = 0; i < ENUM_DEL_KEYS; i++) {
+    char key[16];
+    snprintf(key, sizeof(key), "k%d", i);
+    coucal_write(h, key, i);
+  }
+  return h;
+}
+
+static int coucal_test_enum_delete(void) {
+  coucal h = enum_del_fill();
+  struct_coucal_enum e;
+  coucal_item *it;
+  int seen[ENUM_DEL_KEYS];
+  char victim[16];
+  int i, n;
+
+  CHECK(coucal_nitems(h) == ENUM_DEL_KEYS);
+
+  /* delete an entry already yielded, in the middle of the walk */
+  memset(seen, 0, sizeof(seen));
+  victim[0] = '\0';
+  n = 0;
+  e = coucal_enum_new(h);
+  while ((it = coucal_enum_next(&e)) != NULL) {
+    const int id = atoi((const char *) it->name + 1);
+    CHECK(id >= 0 && id < ENUM_DEL_KEYS);
+    CHECK(!seen[id]);
+    seen[id] = 1;
+    if (++n == 1) {
+      snprintf(victim, sizeof(victim), "%s", (const char *) it->name);
+    } else if (n == 3) {
+      CHECK(coucal_remove(h, victim));
+    }
+  }
+  CHECK(n == ENUM_DEL_KEYS);
+  for (i = 0; i < ENUM_DEL_KEYS; i++) {
+    CHECK(seen[i]);
+  }
+  CHECK(coucal_nitems(h) == ENUM_DEL_KEYS - 1);
+  coucal_delete(&h);
+
+  /* drain the whole table through a single enumeration */
+  h = enum_del_fill();
+  memset(seen, 0, sizeof(seen));
+  n = 0;
+  e = coucal_enum_new(h);
+  while ((it = coucal_enum_next(&e)) != NULL) {
+    char key[16];
+    int id;
+    /* the remove frees the name, so work on a copy */
+    snprintf(key, sizeof(key), "%s", (const char *) it->name);
+    id = atoi(key + 1);
+    CHECK(id >= 0 && id < ENUM_DEL_KEYS);
+    CHECK(!seen[id]);
+    seen[id] = 1;
+    n++;
+    CHECK(coucal_remove(h, key));
+  }
+  CHECK(n == ENUM_DEL_KEYS);
+  CHECK(coucal_nitems(h) == 0);
+  coucal_delete(&h);
+
+  return EXIT_SUCCESS;
+#undef ENUM_DEL_KEYS
+}
+
 int main(int argc, char **argv) {
   if (coucal_test_high_bytes() != EXIT_SUCCESS) {
     return EXIT_FAILURE;
@@ -510,6 +594,9 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   }
   if (coucal_test_oracle() != EXIT_SUCCESS) {
+    return EXIT_FAILURE;
+  }
+  if (coucal_test_enum_delete() != EXIT_SUCCESS) {
     return EXIT_FAILURE;
   }
   if (argc == 2) {
