@@ -326,6 +326,7 @@ static int coucal_test_api(void) {
   /* housekeeping accessors */
   CHECK(coucal_memory_size(h) > 0);
   CHECK(coucal_get_name(h) == NULL);
+  CHECK(coucal_get_name(NULL) == NULL); /* the assertion path passes NULL */
   coucal_set_name(h, "mytable");
   CHECK(coucal_get_name(h) != NULL
         && strcmp(coucal_get_name(h), "mytable") == 0);
@@ -410,6 +411,53 @@ static int coucal_test_value_handler(void) {
   coucal_delete(&h);
   CHECK(g_freed == 6);
   return EXIT_SUCCESS;
+}
+
+/* The key free-handler must fire exactly once per key returned by the dup
+   handler -- on remove, and on delete for the survivors. */
+static unsigned g_key_dups, g_key_frees;
+static coucal_key test_key_dup(coucal_opaque arg, coucal_key_const name) {
+  (void) arg;
+  g_key_dups++;
+  return strdup((const char *) name);
+}
+static void test_key_free(coucal_opaque arg, coucal_key name) {
+  (void) arg;
+  g_key_frees++;
+  free(name);
+}
+
+static int coucal_test_key_handler(void) {
+#define KEY_HANDLER_KEYS 4096
+  coucal h = coucal_new(0);
+  char b[16];
+  int i;
+
+  g_key_dups = 0;
+  g_key_frees = 0;
+  coucal_value_set_key_handler(h, test_key_dup, test_key_free, NULL, NULL,
+                               NULL);
+
+  /* enough keys to force rehashes and to populate the stash */
+  for (i = 0; i < KEY_HANDLER_KEYS; i++) {
+    snprintf(b, sizeof(b), "k%d", i);
+    CHECK(coucal_write(h, b, i) != 0);
+  }
+  CHECK(g_key_dups == KEY_HANDLER_KEYS);
+  CHECK(g_key_frees == 0);
+
+  /* a write over an existing key keeps the stored key */
+  CHECK(coucal_write(h, "k0", -1) == 0);
+  CHECK(g_key_dups == KEY_HANDLER_KEYS);
+  CHECK(g_key_frees == 0);
+
+  CHECK(coucal_remove(h, "k1") != 0);
+  CHECK(g_key_frees == 1);
+
+  coucal_delete(&h);
+  CHECK(g_key_frees == g_key_dups);
+  return EXIT_SUCCESS;
+#undef KEY_HANDLER_KEYS
 }
 
 /* Differential test: drive coucal and a trivial reference model with the same
@@ -507,6 +555,9 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   }
   if (coucal_test_value_handler() != EXIT_SUCCESS) {
+    return EXIT_FAILURE;
+  }
+  if (coucal_test_key_handler() != EXIT_SUCCESS) {
     return EXIT_FAILURE;
   }
   if (coucal_test_oracle() != EXIT_SUCCESS) {

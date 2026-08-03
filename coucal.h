@@ -311,7 +311,11 @@ COUCAL_EXTERN void coucal_value_set_value_handler(coucal hashtable,
 /**
  * Set handlers for keys.
  * dup: handler called to duplicate a key. if NULL, the internal pool is used.
- * free: handler called to free a key. if NULL, the internal pool is used.
+ * free: handler called exactly once for every key returned by 'dup': when its
+ * entry is removed (coucal_remove), and for every remaining entry when the
+ * hashtable is destroyed (coucal_delete). a write over an existing key keeps
+ * the stored key, so it neither duplicates nor frees. if NULL, the internal
+ * pool is used.
  * hash: hashing handler, called to hash a key. if NULL, the default hash
  * function is used.
  * equals: comparison handler, returning non-zero value when two keys are
@@ -356,7 +360,7 @@ COUCAL_EXTERN void coucal_set_name(coucal hashtable, coucal_key_const name);
 
 /**
  * Get the hashtable name, for degugging purpose.
- * Return NULL if no name was defined.
+ * Return NULL if no name was defined, or if 'hashtable' is NULL.
  **/
 COUCAL_EXTERN const char* coucal_get_name(coucal hashtable);
 

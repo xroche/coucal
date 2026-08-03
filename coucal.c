@@ -356,7 +356,8 @@ static INTHASH_INLINE void coucal_nolog(const coucal hashtable,
 }
 
 const char* coucal_get_name(coucal hashtable) {
-  return hashtable->custom.error.name;
+  /* the assertion path calls this with a NULL table (see HashMD5Init) */
+  return hashtable != NULL ? hashtable->custom.error.name : NULL;
 }
 
 static void coucal_log_stats(coucal hashtable) {
@@ -1528,18 +1529,26 @@ void coucal_delete(coucal *phashtable) {
       if (hashtable->items != NULL) {
         /* we need to delete values */
         const size_t hash_size = POW2(hashtable->lg_size);
+        /* internal-pool names go away with the pool buffer below */
+        const int free_names = hashtable->custom.key.free != NULL;
         size_t i;
 
-        /* wipe hashtable values (not names) */
+        /* wipe hashtable values (and names, if custom-allocated) */
         for(i = 0 ; i < hash_size ; i++) {
           if (!coucal_is_free(hashtable, i)) {
             coucal_del_value(hashtable, i);
+            if (free_names) {
+              coucal_del_name(hashtable, &hashtable->items[i]);
+            }
           }
         }
 
-        /* wipe auxiliary stash values (not names) if any */
+        /* wipe auxiliary stash values (and names) if any */
         for(i = 0 ; i < hashtable->stash.size ; i++) {
           coucal_del_value_(hashtable, &hashtable->stash.items[i].value);
+          if (free_names) {
+            coucal_del_name(hashtable, &hashtable->stash.items[i]);
+          }
         }
       }
       /* wipe top-level */
