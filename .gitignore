@@ -10,6 +10,13 @@ tests
 sample
 coucal.tgz
 
+# Left here when httrack compiles us in-tree with libtool/automake
+*.lo
+*.la
+.libs/
+.deps/
+.dirstamp
+
 # Local Claude Code working notes (untracked)
 /CLAUDE.local.md
 
