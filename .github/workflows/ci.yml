@@ -231,7 +231,7 @@ jobs:
             if [ "$cc" = gcc ]; then extra=-Wformat-signedness; fi
             for level in CRITICAL WARNING INFO DEBUG TRACE; do
               $cc -std=c89 -O2 -g -W -Wall -Wextra -Werror -Wcast-qual \
-                -Wformat=2 -Wformat-nonliteral $extra -D_REENTRANT \
+                -Wformat=2 $extra -D_REENTRANT \
                 -DCOUCAL_LOG_LEVEL=COUCAL_LOG_$level -c coucal.c -o /dev/null
             done
           done
