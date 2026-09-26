@@ -1092,14 +1092,17 @@ static int coucal_add_item_(coucal hashtable, coucal_item item) {
         if (item->name == NULL) {
           continue;
         }
-        coucal_crit(hashtable, 
-          "stash[%u]: key='%s' value='%s' pos1=%d pos2=%d"
-          " hash1=%04"UINT_64_HEX_FORMAT" hash2=%04"UINT_64_HEX_FORMAT,
-          (int) i,
-          hashtable->custom.print.key(hashtable->custom.print.arg, item->name),
-          hashtable->custom.print.value(hashtable->custom.print.arg, item->value),
-          (int) pos1, (int) pos2,
-          (uint64_t) item->hashes.hash1, (uint64_t) item->hashes.hash2);
+        coucal_crit(hashtable,
+                    "stash[%d]: key='%s' value='%s' pos1=%d pos2=%d"
+                    " hash1=%04" UINT_64_HEX_FORMAT
+                    " hash2=%04" UINT_64_HEX_FORMAT,
+                    (int) i,
+                    hashtable->custom.print.key(hashtable->custom.print.arg,
+                                                item->name),
+                    hashtable->custom.print.value(hashtable->custom.print.arg,
+                                                  item->value),
+                    (int) pos1, (int) pos2, (uint64_t) item->hashes.hash1,
+                    (uint64_t) item->hashes.hash2);
         if (!coucal_is_free(hashtable, pos1)) {
           coucal_item *const item = &hashtable->items[pos1];
           const size_t pos1 = coucal_hash_to_pos(hashtable, item->hashes.hash1);

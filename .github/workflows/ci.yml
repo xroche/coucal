@@ -227,8 +227,11 @@ jobs:
         run: |
           set -euo pipefail
           for cc in gcc clang; do
+            extra=
+            if [ "$cc" = gcc ]; then extra=-Wformat-signedness; fi
             for level in CRITICAL WARNING INFO DEBUG TRACE; do
-              $cc -O2 -g -W -Wall -Wextra -Werror -Wcast-qual -D_REENTRANT \
+              $cc -std=c89 -O2 -g -W -Wall -Wextra -Werror -Wcast-qual \
+                -Wformat=2 $extra -D_REENTRANT \
                 -DCOUCAL_LOG_LEVEL=COUCAL_LOG_$level -c coucal.c -o /dev/null
             done
           done
