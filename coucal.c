@@ -269,7 +269,8 @@ struct struct_coucal {
 
 /* Logging level. */
 static void coucal_log(const coucal hashtable, coucal_loglevel level,
-                        const char *format, va_list args);
+                       const char *format, va_list args)
+    INTHASH_PRINTF_FUN(3, 0);
 #define DECLARE_LOG_FUNCTION(NAME, LEVEL)                                      \
   static void NAME(const coucal hashtable, const char *format, ...)            \
       INTHASH_PRINTF_FUN(2, 3) INTHASH_UNUSED_FUN;                             \
