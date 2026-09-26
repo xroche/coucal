@@ -1,9 +1,25 @@
 --- murmurhash3.h.orig
 +++ murmurhash3.h
-@@ -7,16 +7,33 @@
- // compile and run any of them on any platform, but your performance with the
- // non-native version will be less than optimal.
- 
+@@ -1,22 +1,40 @@
+-//-----------------------------------------------------------------------------
+-// MurmurHash3 was written by Austin Appleby, and is placed in the public
+-// domain. The author hereby disclaims copyright to this source code.
+-
+-// Note - The x86 and x64 versions do _not_ produce the same results, as the
+-// algorithms are optimized for their respective platforms. You can still
+-// compile and run any of them on any platform, but your performance with the
+-// non-native version will be less than optimal.
+-
++/*-----------------------------------------------------------------------------
++ * MurmurHash3 was written by Austin Appleby, and is placed in the public
++ * domain. The author hereby disclaims copyright to this source code.
++ *
++ * Note - The x86 and x64 versions do _not_ produce the same results, as the
++ * algorithms are optimized for their respective platforms. You can still
++ * compile and run any of them on any platform, but your performance with the
++ * non-native version will be less than optimal.
++ */
++
 +#ifdef _WIN32
 +#include <stddef.h>
 +typedef __int8 int8_t;
@@ -37,7 +53,7 @@
  }
  static uint32_t fmix32 ( uint32_t h )
  {
-@@ -29,10 +46,11 @@
+@@ -29,10 +47,11 @@
    return h;
  }
  #define BIG_CONSTANT(x) (x##LLU)
@@ -52,7 +68,7 @@
  
    uint32_t h1 = seed;
    uint32_t h2 = seed;
-@@ -44,9 +62,9 @@
+@@ -44,9 +63,9 @@
    const uint32_t c3 = 0x38b34ae5; 
    const uint32_t c4 = 0xa1e38b93;
  
@@ -65,7 +81,7 @@
    for(i = -nblocks; i; i++)
    {
      uint32_t k1 = getblock32(blocks,i*4+0);
-@@ -79,34 +97,45 @@
+@@ -79,34 +98,45 @@
    uint32_t k3 = 0;
    uint32_t k4 = 0;
  
