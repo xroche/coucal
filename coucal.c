@@ -832,8 +832,9 @@ static void coucal_free_key(coucal hashtable, coucal_key name) {
 
 static INTHASH_INLINE size_t coucal_hash_to_pos_(size_t lg_size,
                                                  coucal_hashkey hash) {
-  const coucal_hashkey mask = POW2(lg_size) - 1;
-  return hash & mask;
+  /* Both casts are lossless: see coucal_is_acceptable_pow2(). */
+  const coucal_hashkey mask = (coucal_hashkey) (POW2(lg_size) - 1);
+  return (size_t) (hash & mask);
 }
 
 static INTHASH_INLINE size_t coucal_hash_to_pos(const coucal hashtable,

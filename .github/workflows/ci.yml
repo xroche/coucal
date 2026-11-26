@@ -219,7 +219,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential clang
+          sudo apt-get install -y --no-install-recommends build-essential clang gcc-multilib
 
       # clang at TRACE is load-bearing: it is the only combination that flags an
       # unused coucal_nolog (gcc never warns on an unused static inline).
@@ -229,10 +229,22 @@ jobs:
           for cc in gcc clang; do
             extra=
             if [ "$cc" = gcc ]; then extra=-Wformat-signedness; fi
+            if [ "$cc" = clang ]; then extra=-Wshorten-64-to-32; fi
             for level in CRITICAL WARNING INFO DEBUG TRACE; do
               $cc -std=c89 -O2 -g -W -Wall -Wextra -Werror -Wcast-qual \
                 -Wformat=2 $extra -D_REENTRANT \
                 -DCOUCAL_LOG_LEVEL=COUCAL_LOG_$level -c coucal.c -o /dev/null
+            done
+          done
+
+      # HTTrack builds with -Wshorten-64-to-32; each key width narrows on a different ABI.
+      - name: Compile with -Wshorten-64-to-32 (both key widths, 32- and 64-bit)
+        run: |
+          set -euo pipefail
+          for m in -m64 -m32; do
+            for size in 32 64; do
+              clang $m -O2 -W -Wall -Wextra -Werror -Wshorten-64-to-32 \
+                -D_REENTRANT -DCOUCAL_HASH_SIZE=$size -c coucal.c -o /dev/null
             done
           done
 
