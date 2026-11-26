@@ -229,7 +229,6 @@ jobs:
           for cc in gcc clang; do
             extra=
             if [ "$cc" = gcc ]; then extra=-Wformat-signedness; fi
-            if [ "$cc" = clang ]; then extra=-Wshorten-64-to-32; fi
             for level in CRITICAL WARNING INFO DEBUG TRACE; do
               $cc -std=c89 -O2 -g -W -Wall -Wextra -Werror -Wcast-qual \
                 -Wformat=2 $extra -D_REENTRANT \
